@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Delubyo</title>
+  <link rel="stylesheet" href="/src/styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <header>
+      <h1>DELUBYO</h1>
+    </header>
+
+    <main>
+      <div id="message-container" class="message-container"></div>
+
+      <div id="status-container" class="status-container" style="display: none;"></div>
+
+      <div id="choice-container" class="choice-container"></div>
+
+      <div id="input-container" class="input-container" style="display: none;">
+        <input type="text" id="input-field" placeholder="Type your response...">
+        <button id="send-button">Send</button>
+      </div>
+
+      <div id="ending-container" class="ending-container" style="display: none;"></div>
+    </main>
+
+    <footer>
+      <div class="settings">
+        <button id="reset-button" class="settings-button">Reset Game</button>
+        <!-- <button id="ai-settings-button" class="settings-button">AI Settings</button> -->
+        <div class="toggle-container">
+          <label for="timing-toggle">Real-time delays</label>
+          <input type="checkbox" id="timing-toggle" checked>
+        </div>
+        <div class="toggle-container">
+          <label for="theme-toggle">Dark mode</label>
+          <input type="checkbox" id="theme-toggle">
+        </div>
+      </div>
+      <p class="copyright">© 2025 Delubyo - A Typhoon Survival Adventure</p>
+    </footer>
+  </div>
+
+  <script type="module" src="/src/index.ts"></script>
+</body>
+</html>
