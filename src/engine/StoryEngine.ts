@@ -591,30 +591,6 @@ export class StoryEngine {
     }
   }
 
-  private getReturnMessage(activityMessage: string | undefined): string {
-    if (!activityMessage) return "Maya has returned.";
-
-    let action = activityMessage.replace("Maya is ", "");
-
-    if (action.includes("...")) {
-      action = action.replace("...", "");
-    }
-
-    if (action.includes("for") && (action.includes("hours") || action.includes("minutes"))) {
-      return "Maya has returned.";
-    }
-    
-    if (action.includes("trying to rest")) {
-      return "Maya is awake now.";
-    }
-    
-    if (action.includes("waiting for")) {
-      return "Maya's wait is over.";
-    }
-
-    return `Maya has finished ${action}.`;
-  }
-
   public onMessagesUpdate(callback: (messages: Message[]) => void): void {
     this.messageListeners.push(callback);
   }
