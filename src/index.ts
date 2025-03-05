@@ -3,6 +3,9 @@ import { storyNodes, endings, INITIAL_NODE_ID } from './data/story';
 import { GameUI } from './ui/GameUI';
 import { AIManager, AIProvider } from './utils/AIManager';
 import { AISettings } from './components/AISettings';
+import { inject } from '@vercel/analytics';
+
+inject();
 
 const USE_AI = localStorage.getItem('use_ai') === 'true';
 const USE_REAL_TIME = localStorage.getItem('use_real_time') !== 'false';
