@@ -59,13 +59,9 @@ export class AISettings {
     providerSelect.id = 'ai-provider-select';
     
     const providers = [
-      { value: AIProvider.OPENAI, label: 'OpenAI' },
+      { value: AIProvider.OPENAI, label: 'OpenAI (ChatGPT)' },
       { value: AIProvider.CLAUDE, label: 'Claude AI' },
-      { value: AIProvider.DEEPSEEK, label: 'DeepSeek AI' },
-      { value: AIProvider.HUGGINGFACE, label: 'Hugging Face (Free Tier)' },
-      { value: AIProvider.GEMINI, label: 'Google Gemini (Free Tier)' },
-      { value: AIProvider.GROQ, label: 'Groq (Free Tier)' },
-      { value: AIProvider.COHERE, label: 'Cohere (Free Tier)' }
+      { value: AIProvider.DEEPSEEK, label: 'DeepSeek AI' }
     ];
 
     providers.forEach(provider => {
@@ -171,6 +167,7 @@ export class AISettings {
     switch (this.selectedProvider) {
       case AIProvider.OPENAI:
         infoText = 'OpenAI requires an API key. You can get one at <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a>';
+        apiUrlPlaceholder = 'Leave blank unless using a custom endpoint';
         break;
       
       case AIProvider.CLAUDE:
@@ -179,28 +176,8 @@ export class AISettings {
         break;
       
       case AIProvider.DEEPSEEK:
-        infoText = 'DeepSeek requires an API key. You can get one at <a href="https://platform.deepseek.com/" target="_blank">platform.deepseek.com</a>';
+        infoText = 'DeepSeek offers both free and paid tiers. Get your API key at <a href="https://platform.deepseek.com/" target="_blank">platform.deepseek.com</a> or use open-source models through Hugging Face.';
         apiUrlPlaceholder = 'Usually: https://api.deepseek.com/v1/chat/completions';
-        break;
-
-      case AIProvider.HUGGINGFACE:
-        infoText = 'Hugging Face offers a free tier. Get your API key at <a href="https://huggingface.co/settings/tokens" target="_blank">huggingface.co</a>';
-        apiUrlPlaceholder = 'Leave empty for default or enter model endpoint';
-        break;
-      
-      case AIProvider.GEMINI:
-        infoText = 'Google Gemini offers a free tier. Get your API key at <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a>';
-        apiUrlPlaceholder = 'API URL not needed for Gemini';
-        break;
-      
-      case AIProvider.GROQ:
-        infoText = 'Groq currently offers a free tier. Get your API key at <a href="https://console.groq.com/keys" target="_blank">console.groq.com</a>';
-        apiUrlPlaceholder = 'Usually: https://api.groq.com/openai/v1/chat/completions';
-        break;
-      
-      case AIProvider.COHERE:
-        infoText = 'Cohere offers a free tier. Get your API key at <a href="https://dashboard.cohere.com/api-keys" target="_blank">dashboard.cohere.com</a>';
-        apiUrlPlaceholder = 'Usually: https://api.cohere.ai/v1/chat';
         break;
     }
 

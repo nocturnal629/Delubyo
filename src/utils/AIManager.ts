@@ -1,18 +1,16 @@
 import { GameState, Choice } from '../models/types';
 import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 
 export enum AIProvider {
   OPENAI = 'openai',
   CLAUDE = 'claude',
-  DEEPSEEK = 'deepseek',
-  HUGGINGFACE = 'huggingface',  
-  GEMINI = 'gemini',
-  GROQ = 'groq',
-  COHERE = 'cohere'
+  DEEPSEEK = 'deepseek'
 }
 
 export class AIManager {
   private openai: OpenAI | null = null;
+  private claude: Anthropic | null = null;
   private provider: AIProvider;
   private apiKey: string | null = null;
   private apiBaseUrl: string | null = null;
@@ -50,33 +48,26 @@ export class AIManager {
         }
         break;
         
-      case AIProvider.CLAUDE:
-        // Claude doesn't have an official npm package, we'll use fetch API
-        // No initialization needed here, we'll use fetch in the request methods
-        break;
-        
       case AIProvider.DEEPSEEK:
-        // DeepSeek doesn't have an official npm package, we'll use fetch API
-        // No initialization needed here, we'll use fetch in the request methods
+        try {
+          this.openai = new OpenAI({
+            baseURL: this.apiBaseUrl || 'https://api.deepseek.com',
+            apiKey: this.apiKey
+          });
+        } catch (error) {
+          console.error('Failed to initialize DeepSeek:', error);
+        }
         break;
         
-      case AIProvider.HUGGINGFACE:
-        // Hugging Face doesn't require initialization, using fetch API in the request methods
-        break;
-        
-      case AIProvider.GEMINI:
-        // Google's Gemini API uses direct fetch calls
-        // No initialization needed here, we'll use fetch in the request methods
-        break;
-        
-      case AIProvider.GROQ:
-        // Groq uses an OpenAI-compatible API but we'll use fetch directly
-        // No initialization needed here, we'll use fetch in the request methods
-        break;
-        
-      case AIProvider.COHERE:
-        // Cohere API is accessed via fetch
-        // No initialization needed here, we'll use fetch in the request methods
+      case AIProvider.CLAUDE:
+        try {
+          this.claude = new Anthropic({
+            apiKey: this.apiKey,
+            ...(this.apiBaseUrl && { baseURL: this.apiBaseUrl })
+          });
+        } catch (error) {
+          console.error('Failed to initialize Claude:', error);
+        }
         break;
         
       default:
@@ -93,7 +84,7 @@ export class AIManager {
 
   public async generateText(prompt: string, baseText: string, gameState: GameState): Promise<string | null> {
     if (!this.apiKey) return null;
-
+  
     const contextPrompt = this.createContextPrompt(gameState);
     
     try {
@@ -105,19 +96,7 @@ export class AIManager {
           return await this.generateTextClaude(prompt, baseText, contextPrompt);
           
         case AIProvider.DEEPSEEK:
-          return await this.generateTextDeepSeek(prompt, baseText, contextPrompt);
-        
-        case AIProvider.HUGGINGFACE:
-          return await this.generateTextHuggingFace(prompt, baseText, contextPrompt);
-          
-        case AIProvider.GEMINI:
-          return await this.generateTextGemini(prompt, baseText, contextPrompt);
-          
-        case AIProvider.GROQ:
-          return await this.generateTextGroq(prompt, baseText, contextPrompt);
-          
-        case AIProvider.COHERE:
-          return await this.generateTextCohere(prompt, baseText, contextPrompt);
+          return await this.generateTextDeepSeek(prompt, baseText, contextPrompt, "deepseek-chat");
           
         default:
           console.error('Unsupported AI provider');
@@ -125,6 +104,27 @@ export class AIManager {
       }
     } catch (error) {
       console.error(`Error generating AI text with ${this.provider}:`, error);
+      return null;
+    }
+  }
+
+  private async generateTextDeepSeek(prompt: string, baseText: string, contextPrompt: string, model: string): Promise<string | null> {
+    if (!this.openai) return null;
+    
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: model,
+        messages: [
+          { role: "system", content: this.systemPrompt + contextPrompt },
+          { role: "user", content: prompt + "\n\nBase text: " + baseText }
+        ],
+        max_tokens: 150,
+        temperature: 0.7
+      });
+  
+      return response.choices[0]?.message.content || null;
+    } catch (error) {
+      console.error(`Error with OpenAI-compatible API for ${model}:`, error);
       return null;
     }
   }
@@ -151,6 +151,33 @@ export class AIManager {
   }
 
   private async generateTextClaude(prompt: string, baseText: string, contextPrompt: string): Promise<string | null> {
+    if (this.claude) {
+      try {
+        const response = await this.claude.messages.create({
+          model: "claude-3-haiku-20240307",
+          max_tokens: 150,
+          temperature: 0.7,
+          system: this.systemPrompt + contextPrompt,
+          messages: [
+            { role: 'user', content: prompt + "\n\nBase text: " + baseText }
+          ]
+        });
+        
+        if (response.content && response.content.length > 0) {
+          const firstBlock = response.content[0];
+          
+          if (firstBlock.type === 'text') {
+            return firstBlock.text || null;
+          }
+        }
+
+        return null;
+      } catch (error) {
+        console.error('Error with Claude SDK:', error);
+        return null;
+      }
+    }
+    
     const apiUrl = this.apiBaseUrl || 'https://api.anthropic.com/v1/messages';
     
     try {
@@ -177,173 +204,17 @@ export class AIManager {
       }
 
       const data = await response.json();
-      return data.content?.[0]?.text || null;
+
+      if (data.content && data.content.length > 0) {
+        const contentBlock = data.content[0];
+        if (typeof contentBlock.text === 'string') {
+          return contentBlock.text;
+        }
+      }
+
+      return null;
     } catch (error) {
       console.error('Error with Claude API:', error);
-      return null;
-    }
-  }
-
-  private async generateTextDeepSeek(prompt: string, baseText: string, contextPrompt: string): Promise<string | null> {
-    const apiUrl = this.apiBaseUrl || 'https://api.deepseek.com/v1/chat/completions';
-    
-    try {
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey!}`
-        },
-        body: JSON.stringify({
-          model: 'deepseek-chat',
-          messages: [
-            { role: 'system', content: this.systemPrompt + contextPrompt },
-            { role: 'user', content: prompt + "\n\nBase text: " + baseText }
-          ],
-          max_tokens: 150,
-          temperature: 0.7
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`DeepSeek API error: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      return data.choices?.[0]?.message.content || null;
-    } catch (error) {
-      console.error('Error with DeepSeek API:', error);
-      return null;
-    }
-  }
-
-  private async generateTextHuggingFace(prompt: string, baseText: string, contextPrompt: string): Promise<string | null> {
-    const model = this.apiBaseUrl || 'mistralai/Mistral-7B-Instruct-v0.2';
-    const apiUrl = `https://api-inference.huggingface.co/models/${model}`;
-    
-    try {
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify({
-          inputs: `${this.systemPrompt}${contextPrompt}\n\n${prompt}\n\nBase text: ${baseText}`,
-          parameters: {
-            max_new_tokens: 150,
-            temperature: 0.7
-          }
-        })
-      });
-  
-      if (!response.ok) {
-        throw new Error(`Hugging Face API error: ${response.status}`);
-      }
-  
-      const data = await response.json();
-      return data[0]?.generated_text || null;
-    } catch (error) {
-      console.error('Error with Hugging Face API:', error);
-      return null;
-    }
-  }
-  
-  private async generateTextGemini(prompt: string, baseText: string, contextPrompt: string): Promise<string | null> {
-    const apiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
-    
-    try {
-      const response = await fetch(`${apiUrl}?key=${this.apiKey}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: `${this.systemPrompt}${contextPrompt}\n\n${prompt}\n\nBase text: ${baseText}`
-            }]
-          }],
-          generationConfig: {
-            maxOutputTokens: 150,
-            temperature: 0.7
-          }
-        })
-      });
-  
-      if (!response.ok) {
-        throw new Error(`Gemini API error: ${response.status}`);
-      }
-  
-      const data = await response.json();
-      return data.candidates?.[0]?.content?.parts?.[0]?.text || null;
-    } catch (error) {
-      console.error('Error with Gemini API:', error);
-      return null;
-    }
-  }
-  
-  private async generateTextGroq(prompt: string, baseText: string, contextPrompt: string): Promise<string | null> {
-    const apiUrl = this.apiBaseUrl || 'https://api.groq.com/openai/v1/chat/completions';
-    
-    try {
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'llama3-8b-8192',  // Free tier model
-          messages: [
-            { role: "system", content: this.systemPrompt + contextPrompt },
-            { role: "user", content: prompt + "\n\nBase text: " + baseText }
-          ],
-          max_tokens: 150,
-          temperature: 0.7
-        })
-      });
-  
-      if (!response.ok) {
-        throw new Error(`Groq API error: ${response.status}`);
-      }
-  
-      const data = await response.json();
-      return data.choices?.[0]?.message?.content || null;
-    } catch (error) {
-      console.error('Error with Groq API:', error);
-      return null;
-    }
-  }
-  
-  private async generateTextCohere(prompt: string, baseText: string, contextPrompt: string): Promise<string | null> {
-    const apiUrl = this.apiBaseUrl || 'https://api.cohere.ai/v1/chat';
-    
-    try {
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`,
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({
-          message: prompt + "\n\nBase text: " + baseText,
-          model: 'command',
-          preamble: this.systemPrompt + contextPrompt,
-          max_tokens: 150,
-          temperature: 0.7
-        })
-      });
-  
-      if (!response.ok) {
-        throw new Error(`Cohere API error: ${response.status}`);
-      }
-  
-      const data = await response.json();
-      return data.text || null;
-    } catch (error) {
-      console.error('Error with Cohere API:', error);
       return null;
     }
   }
@@ -354,11 +225,11 @@ export class AIManager {
     gameState: GameState
   ): Promise<string | null> {
     if (!this.apiKey || availableChoices.length === 0) return null;
-
+  
     const choicesText = availableChoices
       .map(choice => `${choice.id}: ${choice.text}`)
       .join('\n');
-
+  
     const contextPrompt = this.createContextPrompt(gameState);
     const mappingPrompt = `${this.systemPrompt}${contextPrompt}
       Your task is to map the user's free-form response to the most appropriate available choice.
@@ -382,30 +253,14 @@ export class AIManager {
           break;
           
         case AIProvider.DEEPSEEK:
-          aiResponse = await this.mapResponseDeepSeek(mappingPrompt, userResponse);
-          break;
-        
-        case AIProvider.HUGGINGFACE:
-          aiResponse = await this.mapResponseHuggingFace(mappingPrompt, userResponse);
-          break;
-          
-        case AIProvider.GEMINI:
-          aiResponse = await this.mapResponseGemini(mappingPrompt, userResponse);
-          break;
-          
-        case AIProvider.GROQ:
-          aiResponse = await this.mapResponseGroq(mappingPrompt, userResponse);
-          break;
-          
-        case AIProvider.COHERE:
-          aiResponse = await this.mapResponseCohere(mappingPrompt, userResponse);
+          aiResponse = await this.mapResponseDeepSeek(mappingPrompt, userResponse, "deepseek-chat");
           break;
           
         default:
           console.error('Unsupported AI provider');
           return null;
       }
-
+  
       if (aiResponse !== "NONE" && availableChoices.some(choice => choice.id === aiResponse)) {
         return aiResponse;
       }
@@ -439,6 +294,33 @@ export class AIManager {
   }
 
   private async mapResponseClaude(mappingPrompt: string, userResponse: string): Promise<string | null> {
+    if (this.claude) {
+      try {
+        const response = await this.claude.messages.create({
+          model: "claude-3-haiku-20240307",
+          max_tokens: 30,
+          temperature: 0.2,
+          system: mappingPrompt,
+          messages: [
+            { role: 'user', content: userResponse }
+          ]
+        });
+        
+        if (response.content && response.content.length > 0) {
+        const firstBlock = response.content[0];
+        
+        if (firstBlock.type === 'text') {
+          return firstBlock.text?.trim() || "NONE";
+        }
+      }
+      
+      return "NONE";
+      } catch (error) {
+        console.error('Error with Claude SDK:', error);
+        return "NONE";
+      }
+    }
+    
     const apiUrl = this.apiBaseUrl || 'https://api.anthropic.com/v1/messages';
     
     try {
@@ -465,183 +347,38 @@ export class AIManager {
       }
 
       const data = await response.json();
-      return data.content?.[0]?.text?.trim() || "NONE";
+
+      if (data.content && data.content.length > 0) {
+        const contentBlock = data.content[0];
+        if (typeof contentBlock.text === 'string') {
+          return contentBlock.text.trim() || "NONE";
+        }
+      }
+      
+      return "NONE";
     } catch (error) {
       console.error('Error with Claude API:', error);
       return "NONE";
     }
   }
 
-  private async mapResponseDeepSeek(mappingPrompt: string, userResponse: string): Promise<string | null> {
-    const apiUrl = this.apiBaseUrl || 'https://api.deepseek.com/v1/chat/completions';
+  private async mapResponseDeepSeek(mappingPrompt: string, userResponse: string, model: string): Promise<string | null> {
+    if (!this.openai) return null;
     
     try {
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey!}`
-        },
-        body: JSON.stringify({
-          model: 'deepseek-chat',
-          messages: [
-            { role: 'system', content: mappingPrompt },
-            { role: 'user', content: userResponse }
-          ],
-          max_tokens: 30,
-          temperature: 0.2
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`DeepSeek API error: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      return data.choices?.[0]?.message.content?.trim() || "NONE";
-    } catch (error) {
-      console.error('Error with DeepSeek API:', error);
-      return "NONE";
-    }
-  }
-
-  private async mapResponseHuggingFace(mappingPrompt: string, userResponse: string): Promise<string | null> {
-    const model = this.apiBaseUrl || 'mistralai/Mistral-7B-Instruct-v0.2';
-    const apiUrl = `https://api-inference.huggingface.co/models/${model}`;
-    
-    try {
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify({
-          inputs: `${mappingPrompt}\n\nUser response: ${userResponse}\n\nChoice ID:`,
-          parameters: {
-            max_new_tokens: 30,
-            temperature: 0.2,
-            return_full_text: false
-          }
-        })
+      const response = await this.openai.chat.completions.create({
+        model: model,
+        messages: [
+          { role: "system", content: mappingPrompt },
+          { role: "user", content: userResponse }
+        ],
+        max_tokens: 30,
+        temperature: 0.2
       });
   
-      if (!response.ok) {
-        throw new Error(`Hugging Face API error: ${response.status}`);
-      }
-  
-      const data = await response.json();
-      const generatedText = data[0]?.generated_text || "";
-      const choiceMatch = generatedText.match(/choice_[a-zA-Z0-9_]+/);
-      return choiceMatch ? choiceMatch[0].trim() : "NONE";
+      return response.choices[0]?.message.content?.trim() || "NONE";
     } catch (error) {
-      console.error('Error with Hugging Face API:', error);
-      return "NONE";
-    }
-  }
-  
-  private async mapResponseGemini(mappingPrompt: string, userResponse: string): Promise<string | null> {
-    const apiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
-    
-    try {
-      const response = await fetch(`${apiUrl}?key=${this.apiKey}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: `${mappingPrompt}\n\nUser response: ${userResponse}\n\nChoice ID:`
-            }]
-          }],
-          generationConfig: {
-            maxOutputTokens: 30,
-            temperature: 0.2
-          }
-        })
-      });
-  
-      if (!response.ok) {
-        throw new Error(`Gemini API error: ${response.status}`);
-      }
-  
-      const data = await response.json();
-      const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      
-      const choiceMatch = generatedText.match(/choice_[a-zA-Z0-9_]+/);
-      return choiceMatch ? choiceMatch[0].trim() : "NONE";
-    } catch (error) {
-      console.error('Error with Gemini API:', error);
-      return "NONE";
-    }
-  }
-  
-  private async mapResponseGroq(mappingPrompt: string, userResponse: string): Promise<string | null> {
-    const apiUrl = this.apiBaseUrl || 'https://api.groq.com/openai/v1/chat/completions';
-    
-    try {
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'llama3-8b-8192',
-          messages: [
-            { role: 'system', content: mappingPrompt },
-            { role: 'user', content: userResponse }
-          ],
-          max_tokens: 30,
-          temperature: 0.2
-        })
-      });
-  
-      if (!response.ok) {
-        throw new Error(`Groq API error: ${response.status}`);
-      }
-  
-      const data = await response.json();
-      const responseText = data.choices?.[0]?.message?.content?.trim() || "NONE";
-      
-      return responseText.match(/^choice_[a-zA-Z0-9_]+$/) ? responseText : "NONE";
-    } catch (error) {
-      console.error('Error with Groq API:', error);
-      return "NONE";
-    }
-  }
-  
-  private async mapResponseCohere(mappingPrompt: string, userResponse: string): Promise<string | null> {
-    const apiUrl = this.apiBaseUrl || 'https://api.cohere.ai/v1/chat';
-    
-    try {
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`,
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({
-          message: userResponse,
-          model: 'command',
-          preamble: mappingPrompt,
-          max_tokens: 30,
-          temperature: 0.2
-        })
-      });
-  
-      if (!response.ok) {
-        throw new Error(`Cohere API error: ${response.status}`);
-      }
-  
-      const data = await response.json();
-      const responseText = data.text?.trim() || "NONE";
-      
-      return responseText.match(/^choice_[a-zA-Z0-9_]+$/) ? responseText : "NONE";
-    } catch (error) {
-      console.error('Error with Cohere API:', error);
+      console.error(`Error with OpenAI-compatible API for ${model}:`, error);
       return "NONE";
     }
   }
