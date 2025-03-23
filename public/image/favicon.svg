@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:svgjs="http://svgjs.dev/svgjs" width="1000" height="1000"><style>
+    #light-icon {
+      display: inline;
+    }
+    #dark-icon {
+      display: none;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      #light-icon {
+        display: none;
+      }
+      #dark-icon {
+        display: inline;
+      }
+    }
+  </style><g id="light-icon"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:svgjs="http://svgjs.dev/svgjs" width="1000" height="1000"><g clip-path="url(#SvgjsClipPath1309)"><rect width="1000" height="1000" fill="#ffffff"></rect><g transform="matrix(15.625,0,0,15.625,0,0)"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:svgjs="http://svgjs.dev/svgjs" width="64" height="64"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Background circle -->
+  <circle cx="32" cy="32" r="30" fill="#2d2b38"></circle>
+  
+  <!-- Typhoon/Hurricane spiral in the project's purple theme colors -->
+  <path d="M32,32 
+    C32,29 35,27 38,27 
+    C44,27 46,33 46,36 
+    C46,43 40,45 36,45 
+    C28,45 25,39 25,34 
+    C25,25 32,19 40,19 
+    C51,19 56,29 56,37 
+    C56,48 46,56 36,56 
+    C21,56 15,44 15,35 
+    C15,20 27,10 40,10 
+    C55,10 62,23 62,38" fill="none" stroke="#9d71ff" stroke-width="4.5" stroke-linecap="round"></path>
+    
+  <!-- Inner spiral detail -->
+  <path d="M32,32 
+    C32,30 34,29 36,29 
+    C40,29 41,32 41,34 
+    C41,38 37,40 34,40 
+    C29,40 27,36 27,33" fill="none" stroke="#6930c3" stroke-width="3.5" stroke-linecap="round"></path>
+    
+  <!-- Center dot -->
+  <circle cx="32" cy="32" r="3" fill="#ffffff"></circle>
+</svg></svg></g></g><defs><clipPath id="SvgjsClipPath1309"><rect width="1000" height="1000" x="0" y="0" rx="500" ry="500"></rect></clipPath></defs></svg></g><g id="dark-icon"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:svgjs="http://svgjs.dev/svgjs" width="1000" height="1000"><g clip-path="url(#SvgjsClipPath1310)"><rect width="1000" height="1000" fill="#9d71ff"></rect><g transform="matrix(15.625,0,0,15.625,0,0)"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:svgjs="http://svgjs.dev/svgjs" width="64" height="64"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Background circle -->
+  <circle cx="32" cy="32" r="30" fill="#2d2b38"></circle>
+  
+  <!-- Typhoon/Hurricane spiral in the project's purple theme colors -->
+  <path d="M32,32 
+    C32,29 35,27 38,27 
+    C44,27 46,33 46,36 
+    C46,43 40,45 36,45 
+    C28,45 25,39 25,34 
+    C25,25 32,19 40,19 
+    C51,19 56,29 56,37 
+    C56,48 46,56 36,56 
+    C21,56 15,44 15,35 
+    C15,20 27,10 40,10 
+    C55,10 62,23 62,38" fill="none" stroke="#9d71ff" stroke-width="4.5" stroke-linecap="round"></path>
+    
+  <!-- Inner spiral detail -->
+  <path d="M32,32 
+    C32,30 34,29 36,29 
+    C40,29 41,32 41,34 
+    C41,38 37,40 34,40 
+    C29,40 27,36 27,33" fill="none" stroke="#6930c3" stroke-width="3.5" stroke-linecap="round"></path>
+    
+  <!-- Center dot -->
+  <circle cx="32" cy="32" r="3" fill="#ffffff"></circle>
+</svg></svg></g></g><defs><clipPath id="SvgjsClipPath1310"><rect width="1000" height="1000" x="0" y="0" rx="500" ry="500"></rect></clipPath></defs></svg></g></svg>
