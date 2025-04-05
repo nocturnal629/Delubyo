@@ -38,6 +38,18 @@ export class GameUI {
         }
       });
     }
+
+    this.checkAndShowInputField();
+  }
+  
+  private checkAndShowInputField(): void {
+    if (this.inputContainer) {
+      const isAIConfigured = localStorage.getItem('ai_api_key') && localStorage.getItem('use_ai') === 'true';
+      
+      if (isAIConfigured) {
+        this.inputContainer.style.display = 'flex';
+      }
+    }
   }
   
   private createTypingIndicator(): void {
@@ -171,17 +183,6 @@ export class GameUI {
 
     this.choiceContainer.innerHTML = '';
 
-    const isAIConfigured = localStorage.getItem('ai_api_key') && localStorage.getItem('use_ai') === 'true';
-    const isPrologue = this.storyEngine?.getCurrentNodeId()?.startsWith('prologue_') || false;
-
-    if (this.inputContainer) {
-      if (isAIConfigured && !isPrologue && choices.length === 0) {
-        this.inputContainer.style.display = 'flex';
-      } else {
-        this.inputContainer.style.display = 'none';
-      }
-    }
-
     choices.forEach((choice) => {
       const choiceButton = document.createElement('button');
       choiceButton.classList.add('choice-button');
@@ -189,7 +190,6 @@ export class GameUI {
       choiceButton.addEventListener('click', () => {
         if (this.storyEngine) {
           this.clearChoices();
-
           this.storyEngine.makeChoice(choice.id);
         }
       });
@@ -197,6 +197,8 @@ export class GameUI {
         this.choiceContainer.appendChild(choiceButton);
       }
     });
+
+    this.checkAndShowInputField();
 
     this.scrollToBottom();
   }
