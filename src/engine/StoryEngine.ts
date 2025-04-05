@@ -22,13 +22,15 @@ export class StoryEngine {
   private maxMessageLength: number = 180;
   private typingSpeed: number = 35;
   private maxTypingTime: number = 5000;
+  private processingCustomInput: boolean = false;
 
   constructor(
     storyNodes: StoryNode[], 
     endings: Ending[],
     initialNodeId: string, 
     useAI: boolean = false,
-    useRealTime: boolean = false
+    useRealTime: boolean = false,
+    aiManager: AIManager | null = null
   ) {
     this.storyNodes = new Map(storyNodes.map(node => [node.id, node]));
     this.endings = endings;
@@ -38,7 +40,7 @@ export class StoryEngine {
     
     if (useAI) {
       this.useAI = true;
-      this.aiManager = new AIManager();
+      this.aiManager = aiManager;
     }
   }
 
@@ -124,7 +126,7 @@ export class StoryEngine {
   }
 
   private async displayCurrentNode(): Promise<void> {
-    if (this.isResetting) {
+    if (this.isResetting || this.processingCustomInput) {
       return;
     }
 
@@ -429,6 +431,8 @@ export class StoryEngine {
   }
 
   public makeChoice(choiceId: string): void {
+    if (this.processingCustomInput) return;
+    
     const currentNode = this.storyNodes.get(this.gameState.currentNodeId);
     if (!currentNode || !currentNode.choices) {
       return;
@@ -476,8 +480,10 @@ export class StoryEngine {
     }
   }
 
-  public submitCustomResponse(text: string): void {
-    if (!text.trim()) return;
+  public async submitCustomResponse(text: string): Promise<void> {
+    if (!text.trim() || this.processingCustomInput) return;
+
+    this.processingCustomInput = true;
 
     this.clearChoices();
 
@@ -492,9 +498,10 @@ export class StoryEngine {
 
     this.messages.push(playerMessage);
     this.notifyMessageListeners();
+    this.saveManager.saveMessages(this.messages);
 
     if (this.useAI && this.aiManager) {
-      this.handleAIResponse(text);
+      await this.handleAIResponse(text);
     } else {
       const fallbackMessage: Message = {
         id: `ai_required_${Date.now()}`,
@@ -506,12 +513,18 @@ export class StoryEngine {
       };
       this.messages.push(fallbackMessage);
       this.notifyMessageListeners();
+      this.saveManager.saveMessages(this.messages);
 
       const currentNode = this.storyNodes.get(this.gameState.currentNodeId);
       if (currentNode && currentNode.choices) {
-        this.notifyChoiceListeners(currentNode.choices);
+        const availableChoices = currentNode.choices.filter(choice => 
+          !choice.condition || choice.condition(this.gameState)
+        );
+        this.notifyChoiceListeners(availableChoices);
       }
     }
+
+    this.processingCustomInput = false;
   }
 
   private async handleAIResponse(text: string): Promise<void> {
@@ -520,40 +533,127 @@ export class StoryEngine {
       return;
     }
 
+    const availableChoices = currentNode.choices.filter(choice => 
+      !choice.condition || choice.condition(this.gameState)
+    );
+
     try {
+      this.notifyTypingStart();
+
       const mappedChoiceId = await this.aiManager.mapResponseToChoice(
         text,
-        currentNode.choices,
+        availableChoices,
         this.gameState
       );
 
-      if (mappedChoiceId) {
-        this.makeChoice(mappedChoiceId);
-      } else {
-        this.notifyTypingStart();
-        await this.timeManager.delay(800);
-        this.notifyTypingEnd();
+      let aiResponseText = "";
 
-        const fallbackMessage: Message = {
-          id: `ai_fallback_${Date.now()}`,
-          text: "I'm not sure how to respond to that. Could you try another approach?",
-          character: currentNode.character,
-          timestamp: Date.now(),
-          isPlayer: false,
-          showTimestamp: true
+      const choiceContexts = await Promise.all(availableChoices.map(async (choice) => {
+        const nextNode = this.storyNodes.get(choice.nextNodeId);
+        return {
+          choiceId: choice.id,
+          choiceText: choice.text,
+          nextNodeId: choice.nextNodeId,
+          nextNodeText: nextNode ? nextNode.text : ""
         };
-        
-        this.messages.push(fallbackMessage);
-        this.notifyMessageListeners();
+      }));
 
-        this.notifyChoiceListeners(currentNode.choices);
+      const mappedChoiceContext = mappedChoiceId 
+        ? choiceContexts.find(c => c.choiceId === mappedChoiceId) 
+        : null;
+
+      const responsePrompt = `
+        You are playing the character of Maya in a narrative game about surviving a typhoon in the Philippines.
+        
+        CURRENT CONTEXT:
+        ${currentNode.text}
+        
+        AVAILABLE CHOICES IN THE SCRIPT:
+        ${availableChoices.map(c => `- "${c.text}"`).join('\n')}
+        
+        PLAYER'S MESSAGE:
+        "${text}"
+        
+        ${mappedChoiceId 
+          ? `The player's message most closely matches this choice: "${mappedChoiceContext?.choiceText}"
+             This choice leads to the following script dialogue: "${mappedChoiceContext?.nextNodeText}"` 
+          : `The player's message does not clearly match any of the available choices.`}
+        
+        INSTRUCTIONS:
+        1. If the player's message is CLEARLY RELATED to one of the script choices:
+           - Acknowledge what they said in a natural way
+           - Respond with dialogue that is VERY CLOSE to the original script that would follow their choice
+           - Keep Maya's character consistent (she's in distress during a typhoon disaster)
+           
+        2. If the player's message is UNCLEAR or UNRELATED to the script:
+           - Express mild uncertainty or gentle redirection
+           - Subtly guide them back to the story's central concerns
+           - Avoid directly rejecting them, but steer toward the original script options
+        
+        3. Keep your response under 2-3 sentences and maintain Maya's voice and emotional state.
+        
+        4. DO NOT change the main story direction or create new plot elements.
+      `;
+
+      const aiResponse = await this.aiManager.generateText(
+        responsePrompt,
+        currentNode.text,
+        this.gameState
+      );
+      
+      aiResponseText = aiResponse || "I understand. What do you think we should do next?";
+
+      const typingTime = Math.min(Math.max(aiResponseText.length * 30, 1200), 3000);
+      await this.timeManager.delay(typingTime);
+      this.notifyTypingEnd();
+
+      const aiMessage: Message = {
+        id: `ai_response_${Date.now()}`,
+        text: aiResponseText,
+        character: currentNode.character,
+        timestamp: Date.now(),
+        isPlayer: false,
+        showTimestamp: true
+      };
+      
+      this.messages.push(aiMessage);
+      this.notifyMessageListeners();
+      this.saveManager.saveMessages(this.messages);
+
+      if (mappedChoiceId) {
+        await this.timeManager.delay(1500);
+
+        const choice = availableChoices.find(c => c.id === mappedChoiceId);
+        if (choice) {
+          
+          if (choice.effect) {
+            this.gameState = choice.effect(this.gameState);
+          }
+          
+          const nextNodeId = choice.nextNodeId;
+          this.gameState.lastTimestamp = Date.now();
+          this.gameState.messagesComplete = false;
+          
+          this.saveManager.saveGame(this.gameState);
+          
+          if (currentNode.waitTime && currentNode.waitTime > 0) {
+            await this.handleWaitTime(currentNode);
+          }
+          
+          this.gameState.currentNodeId = nextNodeId;
+          await this.displayCurrentNode();
+        }
+      } else {
+
+        this.notifyChoiceListeners(availableChoices);
       }
     } catch (error) {
       console.error('Error processing AI response:', error);
+      this.notifyTypingEnd();
 
       const errorMessage: Message = {
         id: `ai_error_${Date.now()}`,
-        text: "I'm having trouble understanding. Please choose from the available options.",
+        text: "I'm having trouble understanding. Please choose from the available options to continue.",
         character: currentNode.character,
         timestamp: Date.now(),
         isPlayer: false,
@@ -561,8 +661,9 @@ export class StoryEngine {
       };
       this.messages.push(errorMessage);
       this.notifyMessageListeners();
+      this.saveManager.saveMessages(this.messages);
 
-      this.notifyChoiceListeners(currentNode.choices);
+      this.notifyChoiceListeners(availableChoices);
     }
   }
 
@@ -639,6 +740,7 @@ export class StoryEngine {
 
   public resetGame(): void {
     this.isResetting = true;
+    this.processingCustomInput = false;
     this.clearChoices();
     this.saveManager.clearSave();
     this.gameState = this.createInitialGameState(
