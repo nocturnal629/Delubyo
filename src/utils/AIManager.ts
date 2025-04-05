@@ -1,16 +1,20 @@
 import { GameState, Choice } from '../models/types';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI, GenerativeModel, GenerationConfig } from '@google/generative-ai';
 
 export enum AIProvider {
   OPENAI = 'openai',
   CLAUDE = 'claude',
-  DEEPSEEK = 'deepseek'
+  DEEPSEEK = 'deepseek',
+  GEMINI = 'gemini'
 }
 
 export class AIManager {
   private openai: OpenAI | null = null;
   private claude: Anthropic | null = null;
+  private gemini: GoogleGenerativeAI | null = null;
+  private geminiModel: GenerativeModel | null = null;
   private provider: AIProvider;
   private apiKey: string | null = null;
   private apiBaseUrl: string | null = null;
@@ -70,6 +74,15 @@ export class AIManager {
         }
         break;
         
+      case AIProvider.GEMINI:
+        try {
+          this.gemini = new GoogleGenerativeAI(this.apiKey!);
+          this.geminiModel = this.gemini.getGenerativeModel({ model: "gemini-1.5-flash" });
+        } catch (error) {
+          console.error('Failed to initialize Gemini:', error);
+        }
+        break;
+        
       default:
         console.warn(`No initialization method defined for provider: ${this.provider}`);
     }
@@ -98,12 +111,39 @@ export class AIManager {
         case AIProvider.DEEPSEEK:
           return await this.generateTextDeepSeek(prompt, baseText, contextPrompt, "deepseek-chat");
           
+        case AIProvider.GEMINI:
+          return await this.generateTextGemini(prompt, baseText, contextPrompt);
+          
         default:
           console.error('Unsupported AI provider');
           return null;
       }
     } catch (error) {
       console.error(`Error generating AI text with ${this.provider}:`, error);
+      return null;
+    }
+  }
+
+  private async generateTextGemini(prompt: string, baseText: string, contextPrompt: string): Promise<string | null> {
+    if (!this.geminiModel) return null;
+    
+    try {
+      const generationConfig: GenerationConfig = {
+        maxOutputTokens: 150,
+        temperature: 0.7
+      };
+      
+      const result = await this.geminiModel.generateContent({
+        contents: [
+          { role: "user", parts: [{ text: this.systemPrompt + contextPrompt + '\n\n' + prompt + "\n\nBase text: " + baseText }] }
+        ],
+        generationConfig
+      });
+      
+      const response = result.response;
+      return response.text();
+    } catch (error) {
+      console.error('Error with Gemini API:', error);
       return null;
     }
   }
@@ -256,6 +296,10 @@ export class AIManager {
           aiResponse = await this.mapResponseDeepSeek(mappingPrompt, userResponse, "deepseek-chat");
           break;
           
+        case AIProvider.GEMINI:
+          aiResponse = await this.mapResponseGemini(mappingPrompt, userResponse);
+          break;
+          
         default:
           console.error('Unsupported AI provider');
           return null;
@@ -269,6 +313,30 @@ export class AIManager {
     } catch (error) {
       console.error(`Error mapping response with ${this.provider}:`, error);
       return null;
+    }
+  }
+
+  private async mapResponseGemini(mappingPrompt: string, userResponse: string): Promise<string | null> {
+    if (!this.geminiModel) return null;
+    
+    try {
+      const generationConfig: GenerationConfig = {
+        maxOutputTokens: 30,
+        temperature: 0.2
+      };
+      
+      const result = await this.geminiModel.generateContent({
+        contents: [
+          { role: "user", parts: [{ text: mappingPrompt + "\n\n" + userResponse }] }
+        ],
+        generationConfig
+      });
+      
+      const response = result.response;
+      return response.text().trim() || "NONE";
+    } catch (error) {
+      console.error('Error with Gemini API:', error);
+      return "NONE";
     }
   }
 
@@ -307,14 +375,14 @@ export class AIManager {
         });
         
         if (response.content && response.content.length > 0) {
-        const firstBlock = response.content[0];
-        
-        if (firstBlock.type === 'text') {
-          return firstBlock.text?.trim() || "NONE";
+          const firstBlock = response.content[0];
+          
+          if (firstBlock.type === 'text') {
+            return firstBlock.text?.trim() || "NONE";
+          }
         }
-      }
-      
-      return "NONE";
+        
+        return "NONE";
       } catch (error) {
         console.error('Error with Claude SDK:', error);
         return "NONE";
