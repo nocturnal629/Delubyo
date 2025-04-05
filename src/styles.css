@@ -411,6 +411,12 @@ main {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   position: relative;
   z-index: 2;
+  transition: all 0.3s ease;
+}
+
+.input-container:focus-within {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--primary-color);
 }
 
 #input-field {
@@ -422,16 +428,18 @@ main {
   font-family: var(--font-main);
   background-color: var(--light-bg);
   color: var(--text-color);
+  transition: all 0.2s ease;
 }
 
 #input-field:focus {
   outline: none;
+  background-color: rgba(157, 113, 255, 0.05);
 }
 
 #send-button {
-  width: 50px;
-  height: 36px;
-  border-radius: 45%;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
   background-color: var(--primary-color);
   color: white;
   border: none;
@@ -439,11 +447,37 @@ main {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background-color 0.2s ease;
+  transition: all 0.2s ease;
+  padding: 0;
 }
 
 #send-button:hover {
   background-color: var(--primary-dark);
+  transform: translateY(-2px);
+}
+
+#send-button:active {
+  transform: translateY(0);
+}
+
+#send-button svg {
+  width: 18px;
+  height: 18px;
+  transition: all 0.2s ease;
+}
+
+#send-button:hover svg {
+  transform: rotate(-10deg);
+}
+
+@keyframes sendPulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(0.9); }
+  100% { transform: scale(1); }
+}
+
+.sending {
+  animation: sendPulse 0.3s ease-in-out;
 }
 
 .ending-container {
