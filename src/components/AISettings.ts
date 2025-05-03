@@ -61,7 +61,8 @@ export class AISettings {
     const providers = [
       { value: AIProvider.OPENAI, label: 'OpenAI (ChatGPT)' },
       { value: AIProvider.CLAUDE, label: 'Claude AI' },
-      { value: AIProvider.DEEPSEEK, label: 'DeepSeek AI' }
+      { value: AIProvider.DEEPSEEK, label: 'DeepSeek AI' },
+      { value: AIProvider.GEMINI, label: 'Google Gemini (Free Tier)' }
     ];
 
     providers.forEach(provider => {
@@ -179,12 +180,25 @@ export class AISettings {
         infoText = 'DeepSeek offers both free and paid tiers. Get your API key at <a href="https://platform.deepseek.com/" target="_blank">platform.deepseek.com</a> or use open-source models through Hugging Face.';
         apiUrlPlaceholder = 'Usually: https://api.deepseek.com/v1/chat/completions';
         break;
+        
+      case AIProvider.GEMINI:
+        infoText = 'Google Gemini offers a free tier. Get your API key at <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a>.';
+        apiUrlPlaceholder = 'API URL not required for Gemini';
+        break;
     }
 
     providerInfo.innerHTML = infoText;
     
     if (this.apiUrlInput) {
       this.apiUrlInput.placeholder = apiUrlPlaceholder;
+
+      if (this.selectedProvider === AIProvider.GEMINI) {
+        this.apiUrlInput.style.display = 'none';
+        document.querySelector('label[for="ai-api-url"]')?.setAttribute('style', 'display: none');
+      } else {
+        this.apiUrlInput.style.display = '';
+        document.querySelector('label[for="ai-api-url"]')?.removeAttribute('style');
+      }
     }
   }
 

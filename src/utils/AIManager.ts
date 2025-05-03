@@ -1,16 +1,20 @@
 import { GameState, Choice } from '../models/types';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI, GenerativeModel, GenerationConfig } from '@google/generative-ai';
 
 export enum AIProvider {
   OPENAI = 'openai',
   CLAUDE = 'claude',
-  DEEPSEEK = 'deepseek'
+  DEEPSEEK = 'deepseek',
+  GEMINI = 'gemini'
 }
 
 export class AIManager {
   private openai: OpenAI | null = null;
   private claude: Anthropic | null = null;
+  private gemini: GoogleGenerativeAI | null = null;
+  private geminiModel: GenerativeModel | null = null;
   private provider: AIProvider;
   private apiKey: string | null = null;
   private apiBaseUrl: string | null = null;
@@ -27,9 +31,11 @@ export class AIManager {
 
     this.systemPrompt = `
       You are assisting with a text adventure game called "Delubyo" set in the Philippines during a typhoon disaster.
-      Your responses should be concise, dramatic when appropriate, and reflect Filipino culture and language where relevant.
+      Your responses must ALWAYS be in ENGLISH ONLY, never include Filipino words or phrases.
+      Your responses should be concise, dramatic when appropriate, and reflect the serious nature of the situation.
       You must stay within the established narrative boundaries and character traits.
       All your responses should be compatible with a survivor dealing with a natural disaster scenario.
+      Never use the SYSTEM character in your responses - only respond as Maya when generating dialogue.
     `;
   }
 
@@ -70,6 +76,15 @@ export class AIManager {
         }
         break;
         
+      case AIProvider.GEMINI:
+        try {
+          this.gemini = new GoogleGenerativeAI(this.apiKey!);
+          this.geminiModel = this.gemini.getGenerativeModel({ model: "gemini-1.5-flash" });
+        } catch (error) {
+          console.error('Failed to initialize Gemini:', error);
+        }
+        break;
+        
       default:
         console.warn(`No initialization method defined for provider: ${this.provider}`);
     }
@@ -98,12 +113,39 @@ export class AIManager {
         case AIProvider.DEEPSEEK:
           return await this.generateTextDeepSeek(prompt, baseText, contextPrompt, "deepseek-chat");
           
+        case AIProvider.GEMINI:
+          return await this.generateTextGemini(prompt, baseText, contextPrompt);
+          
         default:
           console.error('Unsupported AI provider');
           return null;
       }
     } catch (error) {
       console.error(`Error generating AI text with ${this.provider}:`, error);
+      return null;
+    }
+  }
+
+  private async generateTextGemini(prompt: string, baseText: string, contextPrompt: string): Promise<string | null> {
+    if (!this.geminiModel) return null;
+    
+    try {
+      const generationConfig: GenerationConfig = {
+        maxOutputTokens: 150,
+        temperature: 0.7
+      };
+      
+      const result = await this.geminiModel.generateContent({
+        contents: [
+          { role: "user", parts: [{ text: this.systemPrompt + contextPrompt + '\n\n' + prompt + "\n\nBase text: " + baseText }] }
+        ],
+        generationConfig
+      });
+      
+      const response = result.response;
+      return response.text();
+    } catch (error) {
+      console.error('Error with Gemini API:', error);
       return null;
     }
   }
@@ -233,12 +275,21 @@ export class AIManager {
     const contextPrompt = this.createContextPrompt(gameState);
     const mappingPrompt = `${this.systemPrompt}${contextPrompt}
       Your task is to map the user's free-form response to the most appropriate available choice.
-      You must select exactly one of the available choices that best matches the user's intent.
-      If none of the choices are a reasonable match, respond with "NONE".
+      You must analyze which of the available choices best matches the user's intent or sentiment.
+      
+      Consider:
+      1. The literal meaning of what the user said
+      2. The implied intent behind their words
+      3. The emotional tone of their message
+      4. Which choice best continues the narrative given their input
+      
       The available choices are:
       ${choicesText}
       
-      Respond ONLY with the choice ID (e.g., "choice_1") or "NONE".`;
+      IMPORTANT: Respond ONLY with the exact choice ID (e.g., "choice_1") of the best match.
+      If no choice is a reasonable match, respond with "NONE".
+      Your entire response should be just the ID or "NONE", nothing else.
+    `;
     
     try {
       let aiResponse = null;
@@ -256,6 +307,10 @@ export class AIManager {
           aiResponse = await this.mapResponseDeepSeek(mappingPrompt, userResponse, "deepseek-chat");
           break;
           
+        case AIProvider.GEMINI:
+          aiResponse = await this.mapResponseGemini(mappingPrompt, userResponse);
+          break;
+          
         default:
           console.error('Unsupported AI provider');
           return null;
@@ -269,6 +324,30 @@ export class AIManager {
     } catch (error) {
       console.error(`Error mapping response with ${this.provider}:`, error);
       return null;
+    }
+  }
+
+  private async mapResponseGemini(mappingPrompt: string, userResponse: string): Promise<string | null> {
+    if (!this.geminiModel) return null;
+    
+    try {
+      const generationConfig: GenerationConfig = {
+        maxOutputTokens: 30,
+        temperature: 0.2
+      };
+      
+      const result = await this.geminiModel.generateContent({
+        contents: [
+          { role: "user", parts: [{ text: mappingPrompt + "\n\n" + userResponse }] }
+        ],
+        generationConfig
+      });
+      
+      const response = result.response;
+      return response.text().trim() || "NONE";
+    } catch (error) {
+      console.error('Error with Gemini API:', error);
+      return "NONE";
     }
   }
 
@@ -307,14 +386,14 @@ export class AIManager {
         });
         
         if (response.content && response.content.length > 0) {
-        const firstBlock = response.content[0];
-        
-        if (firstBlock.type === 'text') {
-          return firstBlock.text?.trim() || "NONE";
+          const firstBlock = response.content[0];
+          
+          if (firstBlock.type === 'text') {
+            return firstBlock.text?.trim() || "NONE";
+          }
         }
-      }
-      
-      return "NONE";
+        
+        return "NONE";
       } catch (error) {
         console.error('Error with Claude SDK:', error);
         return "NONE";
@@ -386,13 +465,18 @@ export class AIManager {
   private createContextPrompt(gameState: GameState): string {
     const flagEntries = Object.entries(gameState.flags).filter(([, value]) => value);
     const flagsText = flagEntries.length ? flagEntries.map(([key]) => key).join(', ') : 'none';
-
+  
     return `
       Current game context:
       - Player is at location: ${gameState.location}
       - Player health: ${gameState.health}%
       - Inventory items: ${gameState.inventory.join(', ') || 'none'}
       - Important flags: ${flagsText}
+      
+      IMPORTANT NOTES:
+      - All responses must be in ENGLISH ONLY, never in Filipino
+      - Only respond as character Maya when generating dialogue, never as SYSTEM
+      - Keep dialogue concise, dramatic, and appropriate for a survival scenario
     `;
   }
 }

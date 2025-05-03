@@ -26,8 +26,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const aiSettings = new AISettings();
   aiSettings.onSave((provider, apiKey, apiUrl) => {
+    localStorage.setItem('use_ai', 'true');
+    
     if (aiManager) {
       aiManager.setApiConfig(provider, apiKey, apiUrl);
+    } else {
+      aiManager = new AIManager(provider, apiKey, apiUrl);
+    }
+    
+    if (confirm('Settings saved! Reload page to apply changes?')) {
+      window.location.reload();
     }
   });
 
@@ -36,7 +44,8 @@ document.addEventListener('DOMContentLoaded', () => {
     endings,
     INITIAL_NODE_ID,
     USE_AI,
-    USE_REAL_TIME
+    USE_REAL_TIME,
+    aiManager
   );
 
   gameUI.connectToStoryEngine(storyEngine);

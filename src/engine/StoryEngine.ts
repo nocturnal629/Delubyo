@@ -2,6 +2,7 @@ import { GameState, StoryNode, Choice, Message, Ending } from '../models/types';
 import { SaveManager } from './SaveManager';
 import { TimeManager } from './TimeManager';
 import { AIManager } from '../utils/AIManager';
+import { CHARACTER_MAYA } from '../data/story';
 
 export class StoryEngine {
   private gameState: GameState;
@@ -22,13 +23,17 @@ export class StoryEngine {
   private maxMessageLength: number = 180;
   private typingSpeed: number = 35;
   private maxTypingTime: number = 5000;
+  private processingCustomInput: boolean = false;
+  private activeMessageProcessing: boolean = false;
+  private sessionId: string = Date.now().toString();
 
   constructor(
     storyNodes: StoryNode[], 
     endings: Ending[],
     initialNodeId: string, 
     useAI: boolean = false,
-    useRealTime: boolean = false
+    useRealTime: boolean = false,
+    aiManager: AIManager | null = null
   ) {
     this.storyNodes = new Map(storyNodes.map(node => [node.id, node]));
     this.endings = endings;
@@ -38,7 +43,7 @@ export class StoryEngine {
     
     if (useAI) {
       this.useAI = true;
-      this.aiManager = new AIManager();
+      this.aiManager = aiManager;
     }
   }
 
@@ -124,239 +129,279 @@ export class StoryEngine {
   }
 
   private async displayCurrentNode(): Promise<void> {
-    if (this.isResetting) {
+    if (this.isResetting || this.activeMessageProcessing) {
       return;
     }
 
-    this.gameState.messagesComplete = false;
-    this.saveManager.saveGame(this.gameState);
-
-    if (this.gameState.currentNodeId === 'intro_1') {
-      this.messages = [];
-      this.notifyMessageListeners();
-    }
-
-    this.clearChoices();
-
-    const currentNode = this.storyNodes.get(this.gameState.currentNodeId);
-    if (!currentNode) {
-      console.error(`Node with ID ${this.gameState.currentNodeId} not found!`);
-      return;
-    }
-
-    if (!this.gameState.visitedNodes.includes(currentNode.id)) {
-      this.gameState.visitedNodes.push(currentNode.id);
-    }
-
-    if (currentNode.effect) {
-      this.gameState = currentNode.effect(this.gameState);
-    }
-
-    if (currentNode.delay && currentNode.delay > 0) {
-      this.updateCharacterStatus('busy', currentNode.delay);
-      await this.timeManager.delay(currentNode.delay);
-    }
-
-    let displayText = currentNode.text;
-    if (this.useAI && this.aiManager && currentNode.aiPrompt) {
-      try {
-        const aiText = await this.aiManager.generateText(
-          currentNode.aiPrompt, 
-          currentNode.text,
-          this.gameState
-        );
-        if (aiText) {
-          displayText = aiText;
-        }
-      } catch (error) {
-        console.error('Error generating AI text:', error);
-      }
-    }
-
-    const textChunks = this.splitTextIntoChunks(displayText);
+    this.activeMessageProcessing = true;
     
-    for (let i = 0; i < textChunks.length; i++) {
-      const chunk = textChunks[i];
-      const typingTime = Math.min(Math.max(chunk.length * this.typingSpeed, 1000), this.maxTypingTime);
-      
-      this.notifyTypingStart();
-      try {
-        await this.timeManager.delay(typingTime);
-      } catch (error) {
-        console.error('Error during typing delay:', error);
-      }
-      this.notifyTypingEnd();
-      
-      const message: Message = {
-        id: `msg_${Date.now()}_${i}`,
-        text: chunk,
-        character: currentNode.character,
-        timestamp: currentNode.character === 'system' ? null : Date.now(),
-        isPlayer: false,
-        showTimestamp: currentNode.character !== 'system'
-      };
-
-      this.messages.push(message);
-      this.notifyMessageListeners();
+    try {
+      this.gameState.messagesComplete = false;
       this.saveManager.saveGame(this.gameState);
-      this.saveManager.saveMessages(this.messages);
-
-      if (i < textChunks.length - 1) {
-        await this.timeManager.delay(500 + Math.random() * 500);
+  
+      if (this.gameState.currentNodeId === 'intro_1') {
+        this.messages = [];
+        this.notifyMessageListeners();
       }
-    }
-
-    if (currentNode.followupMessages && currentNode.followupMessages.length > 0) {
+  
       this.clearChoices();
+  
+      const currentNode = this.storyNodes.get(this.gameState.currentNodeId);
+      if (!currentNode) {
+        console.error(`Node with ID ${this.gameState.currentNodeId} not found!`);
+        return;
+      }
+  
+      if (!this.gameState.visitedNodes.includes(currentNode.id)) {
+        this.gameState.visitedNodes.push(currentNode.id);
+      }
+  
+      if (currentNode.effect) {
+        this.gameState = currentNode.effect(this.gameState);
+      }
+  
+      if (currentNode.delay && currentNode.delay > 0) {
+        this.updateCharacterStatus('busy', currentNode.delay);
+        await this.timeManager.delay(currentNode.delay);
+      }
+  
+      let displayText = currentNode.text;
+      if (this.useAI && this.aiManager && currentNode.aiPrompt) {
+        try {
+          const aiText = await this.aiManager.generateText(
+            currentNode.aiPrompt, 
+            currentNode.text,
+            this.gameState
+          );
+          if (aiText) {
+            displayText = aiText;
+          }
+        } catch (error) {
+          console.error('Error generating AI text:', error);
+        }
+      }
+  
+      const textChunks = this.splitTextIntoChunks(displayText);
       
-      for (const followup of currentNode.followupMessages) {
-        if (followup.delay && followup.delay > 0) {
-          await this.timeManager.delay(followup.delay);
+      for (let i = 0; i < textChunks.length; i++) {
+        if (this.isResetting) {
+          return;
         }
         
-        const followupTextChunks = this.splitTextIntoChunks(followup.text);
+        const chunk = textChunks[i];
+        const typingTime = Math.min(Math.max(chunk.length * this.typingSpeed, 1000), this.maxTypingTime);
         
-        for (let i = 0; i < followupTextChunks.length; i++) {
-          const chunk = followupTextChunks[i];
-          const typingTime = Math.min(Math.max(chunk.length * this.typingSpeed, 1000), this.maxTypingTime);
-          
-          this.notifyTypingStart();
-          try {
-            await this.timeManager.delay(typingTime);
-          } catch (error) {
-            console.error('Error during typing delay:', error);
+        this.notifyTypingStart();
+        try {
+          await this.timeManager.delay(typingTime);
+        } catch (error) {
+          console.error('Error during typing delay:', error);
+        }
+        this.notifyTypingEnd();
+
+        if (this.isResetting) {
+          return;
+        }
+        
+        const message: Message = {
+          id: `msg_${Date.now()}_${i}`,
+          text: chunk,
+          character: currentNode.character,
+          timestamp: currentNode.character === 'system' ? null : Date.now(),
+          isPlayer: false,
+          showTimestamp: currentNode.character !== 'system'
+        };
+  
+        this.messages.push(message);
+        this.notifyMessageListeners();
+        this.saveManager.saveGame(this.gameState);
+        this.saveManager.saveMessages(this.messages);
+  
+        if (i < textChunks.length - 1) {
+          await this.timeManager.delay(500 + Math.random() * 500);
+        }
+      }
+  
+      if (currentNode.followupMessages && currentNode.followupMessages.length > 0) {
+        this.clearChoices();
+        
+        for (const followup of currentNode.followupMessages) {
+          if (this.isResetting) {
+            return;
           }
-          this.notifyTypingEnd();
           
-          const message: Message = {
-            id: `follow_${Date.now()}_${i}`,
-            text: chunk,
-            character: followup.character || currentNode.character,
-            timestamp: (followup.character || currentNode.character) === 'system' ? null : Date.now(),
-            isPlayer: false,
-            showTimestamp: (followup.character || currentNode.character) !== 'system'
-          };
+          if (followup.delay && followup.delay > 0) {
+            await this.timeManager.delay(followup.delay);
+          }
           
-          this.messages.push(message);
-          this.notifyMessageListeners();
-          this.saveManager.saveGame(this.gameState);
-          this.saveManager.saveMessages(this.messages);
+          const followupTextChunks = this.splitTextIntoChunks(followup.text);
           
-          if (i < followupTextChunks.length - 1) {
-            await this.timeManager.delay(500 + Math.random() * 500);
+          for (let i = 0; i < followupTextChunks.length; i++) {
+            if (this.isResetting) {
+              return;
+            }
+            
+            const chunk = followupTextChunks[i];
+            const typingTime = Math.min(Math.max(chunk.length * this.typingSpeed, 1000), this.maxTypingTime);
+            
+            this.notifyTypingStart();
+            try {
+              await this.timeManager.delay(typingTime);
+            } catch (error) {
+              console.error('Error during typing delay:', error);
+            }
+            this.notifyTypingEnd();
+
+            if (this.isResetting) {
+              return;
+            }
+            
+            const message: Message = {
+              id: `follow_${Date.now()}_${i}`,
+              text: chunk,
+              character: followup.character || currentNode.character,
+              timestamp: (followup.character || currentNode.character) === 'system' ? null : Date.now(),
+              isPlayer: false,
+              showTimestamp: (followup.character || currentNode.character) !== 'system'
+            };
+            
+            this.messages.push(message);
+            this.notifyMessageListeners();
+            this.saveManager.saveGame(this.gameState);
+            this.saveManager.saveMessages(this.messages);
+            
+            if (i < followupTextChunks.length - 1) {
+              await this.timeManager.delay(500 + Math.random() * 500);
+            }
           }
         }
       }
-    }
-
-    this.gameState.messagesComplete = true;
-    this.saveManager.saveGame(this.gameState);
-
-    if (currentNode.choices && currentNode.choices.length > 0) {
-      const availableChoices = currentNode.choices.filter(choice => 
-        !choice.condition || choice.condition(this.gameState)
-      );
-    
-      if (availableChoices.length > 0) {
-        this.notifyChoiceListeners(availableChoices);
-        return;
+  
+      this.gameState.messagesComplete = true;
+      this.saveManager.saveGame(this.gameState);
+  
+      if (currentNode.choices && currentNode.choices.length > 0) {
+        const availableChoices = currentNode.choices.filter(choice => 
+          !choice.condition || choice.condition(this.gameState)
+        );
+      
+        if (availableChoices.length > 0) {
+          this.notifyChoiceListeners(availableChoices);
+          return;
+        } else {
+          this.checkForEnding();
+        }
+      } else if (currentNode.waitTime && currentNode.waitTime > 0) {
+        await this.handleWaitTime(currentNode);
+  
+        this.checkForEnding();
       } else {
         this.checkForEnding();
       }
-    } else if (currentNode.waitTime && currentNode.waitTime > 0) {
-      await this.handleWaitTime(currentNode);
-
-      this.checkForEnding();
-    } else {
-      this.checkForEnding();
+    } finally {
+      this.activeMessageProcessing = false;
     }
   }
 
   private async handleWaitTime(currentNode: StoryNode): Promise<void> {
-    this.clearChoices();
-    
-    const lastTimestamp = this.gameState.lastTimestamp;
-    const currentTime = Date.now();
-    const elapsedTime = currentTime - lastTimestamp;
-    const waitTime = currentNode.waitTime || 0
-    
-    if (waitTime > 0 && elapsedTime >= waitTime) {
-      const offlineMessage: Message = {
-        id: `offline_${Date.now()}`,
-        text: "Maya was offline.",
-        character: 'system',
-        timestamp: null,
-        isPlayer: false,
-        showTimestamp: false
-      };
-      this.messages.push(offlineMessage);
-      
-      const onlineMessage: Message = {
-        id: `online_${Date.now()}`,
-        text: "Maya is online.",
-        character: 'system',
-        timestamp: null,
-        isPlayer: false,
-        showTimestamp: false
-      };
-      this.messages.push(onlineMessage);
-      this.notifyMessageListeners();
-      
-      this.saveManager.saveGame(this.gameState);
-      this.saveManager.saveMessages(this.messages);
+    if (this.isResetting || this.activeMessageProcessing) {
       return;
     }
-
-    if (waitTime > 0) {
-      this.updateCharacterStatus('away', waitTime);
-
-      const offlineMessage: Message = {
-        id: `offline_${Date.now()}`,
-        text: "Maya is offline.",
-        character: 'system',
-        timestamp: null,
-        isPlayer: false,
-        showTimestamp: false
-      };
-      this.messages.push(offlineMessage);
-      this.notifyMessageListeners();
-
-      this.saveManager.saveGame(this.gameState);
-      this.saveManager.saveMessages(this.messages);
+    
+    this.activeMessageProcessing = true;
+    
+    try {
+      this.clearChoices();
       
-      if (currentNode.activityMessage) {
-        const activityMessage: Message = {
-          id: `activity_${Date.now()}`,
-          text: currentNode.activityMessage,
+      const lastTimestamp = this.gameState.lastTimestamp;
+      const currentTime = Date.now();
+      const elapsedTime = currentTime - lastTimestamp;
+      const waitTime = currentNode.waitTime || 0
+      
+      if (waitTime > 0 && elapsedTime >= waitTime) {
+        const offlineMessage: Message = {
+          id: `offline_${Date.now()}`,
+          text: "Maya was offline.",
           character: 'system',
           timestamp: null,
           isPlayer: false,
           showTimestamp: false
         };
-        this.messages.push(activityMessage);
+        this.messages.push(offlineMessage);
+        
+        const onlineMessage: Message = {
+          id: `online_${Date.now()}`,
+          text: "Maya is online.",
+          character: 'system',
+          timestamp: null,
+          isPlayer: false,
+          showTimestamp: false
+        };
+        this.messages.push(onlineMessage);
         this.notifyMessageListeners();
         
         this.saveManager.saveGame(this.gameState);
         this.saveManager.saveMessages(this.messages);
+        return;
       }
-      
-      await this.timeManager.delay(waitTime);
+  
+      if (waitTime > 0) {
+        this.updateCharacterStatus('away', waitTime);
+  
+        const offlineMessage: Message = {
+          id: `offline_${Date.now()}`,
+          text: "Maya is offline.",
+          character: 'system',
+          timestamp: null,
+          isPlayer: false,
+          showTimestamp: false
+        };
+        this.messages.push(offlineMessage);
+        this.notifyMessageListeners();
+  
+        this.saveManager.saveGame(this.gameState);
+        this.saveManager.saveMessages(this.messages);
+        
+        if (currentNode.activityMessage) {
+          const activityMessage: Message = {
+            id: `activity_${Date.now()}`,
+            text: currentNode.activityMessage,
+            character: 'system',
+            timestamp: null,
+            isPlayer: false,
+            showTimestamp: false
+          };
+          this.messages.push(activityMessage);
+          this.notifyMessageListeners();
+          
+          this.saveManager.saveGame(this.gameState);
+          this.saveManager.saveMessages(this.messages);
+        }
+        
+        await this.timeManager.delay(waitTime);
 
-      const onlineMessage: Message = {
-        id: `online_${Date.now()}`,
-        text: "Maya is online.",
-        character: 'system',
-        timestamp: null,
-        isPlayer: false,
-        showTimestamp: false
-      };
-      this.messages.push(onlineMessage);
-      this.notifyMessageListeners();
-
-      this.saveManager.saveGame(this.gameState);
-      this.saveManager.saveMessages(this.messages);
-      
-      this.updateCharacterStatus('active', 0);
+        if (this.isResetting) {
+          return;
+        }
+  
+        const onlineMessage: Message = {
+          id: `online_${Date.now()}`,
+          text: "Maya is online.",
+          character: 'system',
+          timestamp: null,
+          isPlayer: false,
+          showTimestamp: false
+        };
+        this.messages.push(onlineMessage);
+        this.notifyMessageListeners();
+  
+        this.saveManager.saveGame(this.gameState);
+        this.saveManager.saveMessages(this.messages);
+        
+        this.updateCharacterStatus('active', 0);
+      }
+    } finally {
+      this.activeMessageProcessing = false;
     }
   }
 
@@ -429,6 +474,8 @@ export class StoryEngine {
   }
 
   public makeChoice(choiceId: string): void {
+    if (this.processingCustomInput) return;
+    
     const currentNode = this.storyNodes.get(this.gameState.currentNodeId);
     if (!currentNode || !currentNode.choices) {
       return;
@@ -476,11 +523,11 @@ export class StoryEngine {
     }
   }
 
-  public submitCustomResponse(text: string): void {
-    if (!text.trim()) return;
-
-    this.clearChoices();
-
+  public async submitCustomResponse(text: string): Promise<void> {
+    if (!text.trim() || this.isResetting) {
+      return;
+    }
+  
     const playerMessage: Message = {
       id: `custom_${Date.now()}`,
       text,
@@ -489,12 +536,13 @@ export class StoryEngine {
       isPlayer: true,
       showTimestamp: true
     };
-
+  
     this.messages.push(playerMessage);
     this.notifyMessageListeners();
-
+    this.saveManager.saveMessages(this.messages);
+  
     if (this.useAI && this.aiManager) {
-      this.handleAIResponse(text);
+      await this.handleAIResponse(text);
     } else {
       const fallbackMessage: Message = {
         id: `ai_required_${Date.now()}`,
@@ -506,63 +554,187 @@ export class StoryEngine {
       };
       this.messages.push(fallbackMessage);
       this.notifyMessageListeners();
-
+      this.saveManager.saveMessages(this.messages);
+  
       const currentNode = this.storyNodes.get(this.gameState.currentNodeId);
       if (currentNode && currentNode.choices) {
-        this.notifyChoiceListeners(currentNode.choices);
+        const availableChoices = currentNode.choices.filter(choice => 
+          !choice.condition || choice.condition(this.gameState)
+        );
+        this.notifyChoiceListeners(availableChoices);
       }
     }
   }
 
   private async handleAIResponse(text: string): Promise<void> {
+    if (this.isResetting) {
+      return;
+    }
+    
+    const capturedSessionId = this.sessionId;
+    
     const currentNode = this.storyNodes.get(this.gameState.currentNodeId);
     if (!currentNode || !currentNode.choices || !this.aiManager) {
       return;
     }
-
+  
+    const availableChoices = currentNode.choices.filter(choice => 
+      !choice.condition || choice.condition(this.gameState)
+    );
+  
+    if (availableChoices.length === 0) {
+      return;
+    }
+  
     try {
+      this.clearChoices();
+      this.notifyTypingStart();
+  
       const mappedChoiceId = await this.aiManager.mapResponseToChoice(
         text,
-        currentNode.choices,
+        availableChoices,
         this.gameState
       );
-
-      if (mappedChoiceId) {
-        this.makeChoice(mappedChoiceId);
-      } else {
-        this.notifyTypingStart();
-        await this.timeManager.delay(800);
+      
+      if (capturedSessionId !== this.sessionId || this.isResetting) {
         this.notifyTypingEnd();
-
-        const fallbackMessage: Message = {
-          id: `ai_fallback_${Date.now()}`,
-          text: "I'm not sure how to respond to that. Could you try another approach?",
-          character: currentNode.character,
-          timestamp: Date.now(),
-          isPlayer: false,
-          showTimestamp: true
-        };
-        
-        this.messages.push(fallbackMessage);
-        this.notifyMessageListeners();
-
-        this.notifyChoiceListeners(currentNode.choices);
+        return;
       }
-    } catch (error) {
-      console.error('Error processing AI response:', error);
+  
+      const choiceToUse = mappedChoiceId
+        ? availableChoices.find(c => c.id === mappedChoiceId)
+        : availableChoices[0];
+  
+      if (!choiceToUse) {
+        throw new Error("Failed to select a valid choice");
+      }
+      
+      const responsePrompt = `
+        You are playing the character of Maya in a narrative game about surviving a typhoon in the Philippines.
+        
+        CURRENT CONTEXT:
+        ${currentNode.text}
+        
+        PLAYER'S MESSAGE:
+        "${text}"
+        
+        INSTRUCTIONS:
+        1. Acknowledge what the player said in a natural way
+        2. Keep your response under 2-3 sentences, in Maya's voice
+        3. Your response must be in ENGLISH ONLY (never use Filipino)
+        4. Your response should naturally follow from the current context
+        5. DO NOT use quotation marks at the beginning or end of your response
+        6. Write as if you are speaking directly, not quoting someone
+      `;
+  
+      const aiResponse = await this.aiManager.generateText(
+        responsePrompt,
+        currentNode.text,
+        this.gameState
+      );
+      
+      if (capturedSessionId !== this.sessionId || this.isResetting) {
+        this.notifyTypingEnd();
+        return;
+      }
+      
+      let aiResponseText = aiResponse || "I understand. That's important to consider.";
+      
+      aiResponseText = aiResponseText.trim();
+      aiResponseText = aiResponseText.replace(/^["'"']|["'"']$/g, '');
 
-      const errorMessage: Message = {
-        id: `ai_error_${Date.now()}`,
-        text: "I'm having trouble understanding. Please choose from the available options.",
-        character: currentNode.character,
+      aiResponseText = aiResponseText.split('\n')
+        .map(line => line.trim().replace(/^["'"']|["'"']$/g, ''))
+        .join('\n');
+  
+      const typingTime = Math.min(Math.max(aiResponseText.length * 30, 1200), 3000);
+      await this.timeManager.delay(typingTime);
+      
+      if (capturedSessionId !== this.sessionId || this.isResetting) {
+        this.notifyTypingEnd();
+        return;
+      }
+      
+      this.notifyTypingEnd();
+  
+      const aiMessage: Message = {
+        id: `ai_response_${Date.now()}`,
+        text: aiResponseText,
+        character: CHARACTER_MAYA,
         timestamp: Date.now(),
         isPlayer: false,
         showTimestamp: true
       };
-      this.messages.push(errorMessage);
+      
+      this.messages.push(aiMessage);
       this.notifyMessageListeners();
-
-      this.notifyChoiceListeners(currentNode.choices);
+      this.saveManager.saveMessages(this.messages);
+  
+      if (capturedSessionId !== this.sessionId || this.isResetting) {
+        return;
+      }
+  
+      if (choiceToUse.effect) {
+        this.gameState = choiceToUse.effect(this.gameState);
+      }
+      
+      const nextNodeId = choiceToUse.nextNodeId;
+      this.gameState.currentNodeId = nextNodeId;
+      this.gameState.lastTimestamp = Date.now();
+      this.gameState.messagesComplete = false;
+      
+      this.saveManager.saveGame(this.gameState);
+      
+      if (currentNode.waitTime && currentNode.waitTime > 0) {
+        await this.handleWaitTime(currentNode);
+        
+        if (capturedSessionId !== this.sessionId || this.isResetting) {
+          return;
+        }
+      }
+      
+      await this.timeManager.delay(1000);
+      
+      if (capturedSessionId !== this.sessionId || this.isResetting) {
+        return;
+      }
+      
+      await this.displayCurrentNode();
+  
+    } catch {
+      this.notifyTypingEnd();
+  
+      if (capturedSessionId === this.sessionId && !this.isResetting) {
+        const errorMessage: Message = {
+          id: `ai_error_${Date.now()}`,
+          text: "I understand. Let me continue...",
+          character: CHARACTER_MAYA,
+          timestamp: Date.now(),
+          isPlayer: false,
+          showTimestamp: true
+        };
+        this.messages.push(errorMessage);
+        this.notifyMessageListeners();
+        this.saveManager.saveMessages(this.messages);
+      }
+      
+      if (capturedSessionId === this.sessionId && !this.isResetting) {
+        const defaultChoice = availableChoices[0];
+        if (defaultChoice) {
+          if (defaultChoice.effect) {
+            this.gameState = defaultChoice.effect(this.gameState);
+          }
+          
+          const nextNodeId = defaultChoice.nextNodeId;
+          this.gameState.lastTimestamp = Date.now();
+          this.gameState.messagesComplete = false;
+          this.gameState.currentNodeId = nextNodeId;
+          
+          this.saveManager.saveGame(this.gameState);
+          
+          await this.displayCurrentNode();
+        }
+      }
     }
   }
 
@@ -639,17 +811,29 @@ export class StoryEngine {
 
   public resetGame(): void {
     this.isResetting = true;
+    this.processingCustomInput = false;
+    this.activeMessageProcessing = false;
+
+    this.sessionId = Date.now().toString();
+
     this.clearChoices();
+
+    this.notifyTypingEnd();
+
+    this.notifyStatusUpdate('');
+
     this.saveManager.clearSave();
+
     this.gameState = this.createInitialGameState(
       Array.from(this.storyNodes.values())[0]?.id || ''
     );
+
     this.messages = [];
     this.notifyMessageListeners();
 
     setTimeout(() => {
       this.isResetting = false;
       this.displayCurrentNode();
-    }, 100);
+    }, 300);
   }
 }

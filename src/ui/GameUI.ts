@@ -12,7 +12,10 @@ export class GameUI {
   private storyEngine: StoryEngine | null = null;
   private typingIndicator: HTMLElement | null = null;
   private characterStatusIndicator: HTMLElement | null = null;
-  
+  private customInputAllowed: boolean = false;
+  private inputPlaceholderDefault: string = "Type your response...";
+  private inputDisabledMessage: string = "Waiting for Maya to finish...";
+  private multipleChoicesMessage: string = "Please select from the choices above";
 
   constructor() {
     this.initializeUI();
@@ -37,6 +40,18 @@ export class GameUI {
           this.handleCustomInput();
         }
       });
+    }
+
+    this.checkAndShowInputField();
+  }
+  
+  private checkAndShowInputField(): void {
+    if (this.inputContainer) {
+      const isAIConfigured = localStorage.getItem('ai_api_key') && localStorage.getItem('use_ai') === 'true';
+      
+      if (isAIConfigured) {
+        this.inputContainer.style.display = 'flex';
+      }
     }
   }
   
@@ -75,13 +90,15 @@ export class GameUI {
 
   public connectToStoryEngine(storyEngine: StoryEngine): void {
     this.storyEngine = storyEngine;
-
+  
     storyEngine.onMessagesUpdate((messages) => this.updateMessages(messages));
     storyEngine.onChoicesAvailable((choices) => this.updateChoices(choices));
     storyEngine.onGameOver((ending) => this.showEnding(ending));
     storyEngine.onTypingStart(() => this.showTypingIndicator());
     storyEngine.onTypingEnd(() => this.hideTypingIndicator());
     storyEngine.onStatusUpdate((status) => this.updateCharacterStatus(status));
+
+    this.updateInputFieldState();
   }
 
   private updateMessages(messages: Message[]): void {
@@ -140,6 +157,9 @@ export class GameUI {
     
     this.typingIndicator.style.display = 'flex';
     this.scrollToBottom();
+
+    this.customInputAllowed = false;
+    this.updateInputFieldState();
   }
   
   public hideTypingIndicator(): void {
@@ -168,20 +188,10 @@ export class GameUI {
 
   private updateChoices(choices: Choice[]): void {
     if (!this.choiceContainer) return;
-
+  
     this.choiceContainer.innerHTML = '';
 
-    const isAIConfigured = localStorage.getItem('ai_api_key') && localStorage.getItem('use_ai') === 'true';
-    const isPrologue = this.storyEngine?.getCurrentNodeId()?.startsWith('prologue_') || false;
-
-    if (this.inputContainer) {
-      if (isAIConfigured && !isPrologue && choices.length === 0) {
-        this.inputContainer.style.display = 'flex';
-      } else {
-        this.inputContainer.style.display = 'none';
-      }
-    }
-
+    this.customInputAllowed = (choices.length === 1);
     choices.forEach((choice) => {
       const choiceButton = document.createElement('button');
       choiceButton.classList.add('choice-button');
@@ -189,7 +199,6 @@ export class GameUI {
       choiceButton.addEventListener('click', () => {
         if (this.storyEngine) {
           this.clearChoices();
-
           this.storyEngine.makeChoice(choice.id);
         }
       });
@@ -198,7 +207,37 @@ export class GameUI {
       }
     });
 
+    this.updateInputFieldState();
     this.scrollToBottom();
+  }
+
+  private updateInputFieldState(): void {
+    if (!this.inputContainer || !this.inputField) return;
+  
+    const isAIConfigured = localStorage.getItem('ai_api_key') && localStorage.getItem('use_ai') === 'true';
+    
+    if (!isAIConfigured) {
+      this.inputContainer.style.display = 'none';
+      return;
+    }
+  
+    this.inputContainer.style.display = 'flex';
+  
+    if (this.customInputAllowed) {
+      this.inputField.disabled = false;
+      this.inputField.placeholder = this.inputPlaceholderDefault;
+      this.inputContainer.classList.remove('input-disabled');
+    } else {
+      this.inputField.disabled = true;
+
+      if (this.choiceContainer && this.choiceContainer.children.length > 1) {
+        this.inputField.placeholder = this.multipleChoicesMessage;
+      } else {
+        this.inputField.placeholder = this.inputDisabledMessage;
+      }
+      
+      this.inputContainer.classList.add('input-disabled');
+    }
   }
   
   private clearChoices(): void {
@@ -208,13 +247,20 @@ export class GameUI {
   }
 
   private handleCustomInput(): void {
-    if (!this.inputField || !this.storyEngine) return;
-
+    if (!this.inputField || !this.storyEngine || !this.customInputAllowed) {
+      return;
+    }
+  
     const text = this.inputField.value.trim();
     if (text) {
+      this.customInputAllowed = false;
+      this.updateInputFieldState();
+
       this.storyEngine.submitCustomResponse(text);
       this.inputField.value = '';
       this.scrollToBottom();
+
+      this.clearChoices();
     }
   }
 
