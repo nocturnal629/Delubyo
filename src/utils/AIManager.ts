@@ -31,9 +31,11 @@ export class AIManager {
 
     this.systemPrompt = `
       You are assisting with a text adventure game called "Delubyo" set in the Philippines during a typhoon disaster.
-      Your responses should be concise, dramatic when appropriate, and reflect Filipino culture and language where relevant.
+      Your responses must ALWAYS be in ENGLISH ONLY, never include Filipino words or phrases.
+      Your responses should be concise, dramatic when appropriate, and reflect the serious nature of the situation.
       You must stay within the established narrative boundaries and character traits.
       All your responses should be compatible with a survivor dealing with a natural disaster scenario.
+      Never use the SYSTEM character in your responses - only respond as Maya when generating dialogue.
     `;
   }
 
@@ -273,12 +275,21 @@ export class AIManager {
     const contextPrompt = this.createContextPrompt(gameState);
     const mappingPrompt = `${this.systemPrompt}${contextPrompt}
       Your task is to map the user's free-form response to the most appropriate available choice.
-      You must select exactly one of the available choices that best matches the user's intent.
-      If none of the choices are a reasonable match, respond with "NONE".
+      You must analyze which of the available choices best matches the user's intent or sentiment.
+      
+      Consider:
+      1. The literal meaning of what the user said
+      2. The implied intent behind their words
+      3. The emotional tone of their message
+      4. Which choice best continues the narrative given their input
+      
       The available choices are:
       ${choicesText}
       
-      Respond ONLY with the choice ID (e.g., "choice_1") or "NONE".`;
+      IMPORTANT: Respond ONLY with the exact choice ID (e.g., "choice_1") of the best match.
+      If no choice is a reasonable match, respond with "NONE".
+      Your entire response should be just the ID or "NONE", nothing else.
+    `;
     
     try {
       let aiResponse = null;
@@ -454,13 +465,18 @@ export class AIManager {
   private createContextPrompt(gameState: GameState): string {
     const flagEntries = Object.entries(gameState.flags).filter(([, value]) => value);
     const flagsText = flagEntries.length ? flagEntries.map(([key]) => key).join(', ') : 'none';
-
+  
     return `
       Current game context:
       - Player is at location: ${gameState.location}
       - Player health: ${gameState.health}%
       - Inventory items: ${gameState.inventory.join(', ') || 'none'}
       - Important flags: ${flagsText}
+      
+      IMPORTANT NOTES:
+      - All responses must be in ENGLISH ONLY, never in Filipino
+      - Only respond as character Maya when generating dialogue, never as SYSTEM
+      - Keep dialogue concise, dramatic, and appropriate for a survival scenario
     `;
   }
 }
