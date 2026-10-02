@@ -3,6 +3,13 @@ import { SaveManager } from './SaveManager';
 import { TimeManager } from './TimeManager';
 import { AIManager } from '../utils/AIManager';
 import { CHARACTER_MAYA } from '../data/story';
+import {
+  splitTextIntoChunks,
+  calculateTypingDelay,
+  DEFAULT_MAX_MESSAGE_LENGTH,
+  DEFAULT_TYPING_SPEED,
+  DEFAULT_MAX_TYPING_TIME
+} from './TextChunker';
 
 export class StoryEngine {
   private gameState: GameState;
@@ -18,11 +25,12 @@ export class StoryEngine {
   private typingStartListeners: (() => void)[] = [];
   private typingEndListeners: (() => void)[] = [];
   private statusUpdateListeners: ((status: string) => void)[] = [];
+  private gameStateUpdateListeners: ((state: GameState) => void)[] = [];
   private useAI: boolean = false;
   private isResetting: boolean = false;
-  private maxMessageLength: number = 180;
-  private typingSpeed: number = 35;
-  private maxTypingTime: number = 5000;
+  private maxMessageLength: number = DEFAULT_MAX_MESSAGE_LENGTH;
+  private typingSpeed: number = DEFAULT_TYPING_SPEED;
+  private maxTypingTime: number = DEFAULT_MAX_TYPING_TIME;
   private processingCustomInput: boolean = false;
   private activeMessageProcessing: boolean = false;
   private sessionId: string = Date.now().toString();
@@ -105,7 +113,9 @@ export class StoryEngine {
       if (currentNode && currentNode.effect) {
         this.gameState = currentNode.effect(this.gameState);
       }
-      
+
+      this.notifyGameStateUpdate();
+
       this.clearChoices();
 
       if (this.gameState.messagesComplete && currentNode && currentNode.choices) {
@@ -138,7 +148,8 @@ export class StoryEngine {
     try {
       this.gameState.messagesComplete = false;
       this.saveManager.saveGame(this.gameState);
-  
+      this.notifyGameStateUpdate();
+
       if (this.gameState.currentNodeId === 'intro_1') {
         this.messages = [];
         this.notifyMessageListeners();
@@ -158,8 +169,9 @@ export class StoryEngine {
   
       if (currentNode.effect) {
         this.gameState = currentNode.effect(this.gameState);
+        this.notifyGameStateUpdate();
       }
-  
+
       if (currentNode.delay && currentNode.delay > 0) {
         this.updateCharacterStatus('busy', currentNode.delay);
         await this.timeManager.delay(currentNode.delay);
@@ -189,7 +201,7 @@ export class StoryEngine {
         }
         
         const chunk = textChunks[i];
-        const typingTime = Math.min(Math.max(chunk.length * this.typingSpeed, 1000), this.maxTypingTime);
+        const typingTime = calculateTypingDelay(chunk.length, this.typingSpeed, 1000, this.maxTypingTime);
         
         this.notifyTypingStart();
         try {
@@ -242,7 +254,7 @@ export class StoryEngine {
             }
             
             const chunk = followupTextChunks[i];
-            const typingTime = Math.min(Math.max(chunk.length * this.typingSpeed, 1000), this.maxTypingTime);
+            const typingTime = calculateTypingDelay(chunk.length, this.typingSpeed, 1000, this.maxTypingTime);
             
             this.notifyTypingStart();
             try {
@@ -410,39 +422,7 @@ export class StoryEngine {
   }
 
   private splitTextIntoChunks(text: string): string[] {
-    if (text.length <= this.maxMessageLength) {
-      return [text];
-    }
-
-    const sentences = text.match(/[^.!?]+[.!?]+/g) || [];
-    
-    if (sentences.length === 0) {
-      const chunks: string[] = [];
-      for (let i = 0; i < text.length; i += this.maxMessageLength) {
-        chunks.push(text.substring(i, Math.min(i + this.maxMessageLength, text.length)));
-      }
-      return chunks;
-    }
-
-    const chunks: string[] = [];
-    let currentChunk = '';
-    
-    for (const sentence of sentences) {
-      if (currentChunk.length + sentence.length <= this.maxMessageLength) {
-        currentChunk += sentence;
-      } else {
-        if (currentChunk) {
-          chunks.push(currentChunk.trim());
-        }
-        currentChunk = sentence;
-      }
-    }
-    
-    if (currentChunk) {
-      chunks.push(currentChunk.trim());
-    }
-    
-    return chunks;
+    return splitTextIntoChunks(text, this.maxMessageLength);
   }
 
   private updateCharacterStatus(status: string, duration: number): void {
@@ -471,6 +451,14 @@ export class StoryEngine {
   
   public onStatusUpdate(callback: (status: string) => void): void {
     this.statusUpdateListeners.push(callback);
+  }
+
+  public onGameStateUpdate(callback: (state: GameState) => void): void {
+    this.gameStateUpdateListeners.push(callback);
+  }
+
+  private notifyGameStateUpdate(): void {
+    this.gameStateUpdateListeners.forEach(listener => listener({ ...this.gameState }));
   }
 
   public makeChoice(choiceId: string): void {
@@ -502,6 +490,7 @@ export class StoryEngine {
 
     if (choice.effect) {
       this.gameState = choice.effect(this.gameState);
+      this.notifyGameStateUpdate();
     }
 
     const nextNodeId = choice.nextNodeId;
@@ -589,74 +578,75 @@ export class StoryEngine {
     try {
       this.clearChoices();
       this.notifyTypingStart();
-  
-      const mappedChoiceId = await this.aiManager.mapResponseToChoice(
-        text,
-        availableChoices,
-        this.gameState
-      );
-      
+
+      // The acknowledgment prompt only references the current node text and the
+      // raw player input — it never depends on which choice the mapping picks, so
+      // the mapping call and this generation call have no data dependency and can
+      // run concurrently instead of sequentially (fix #1 — halves the latency).
+      const acknowledgePrompt = this.buildAcknowledgePrompt(currentNode.text, text);
+
+      const [mappedChoiceId, acknowledgeResponse] = await Promise.all([
+        this.aiManager.mapResponseToChoice(text, availableChoices, this.gameState),
+        this.aiManager.generateText(acknowledgePrompt, currentNode.text, this.gameState)
+      ]);
+
+      // Both calls have now settled. A resetGame() (which rotates sessionId) or a
+      // newer submitCustomResponse may have fired while they were in flight; this
+      // single combined guard after Promise.all replaces the per-await checks that
+      // existed when the calls were sequential, using the same sessionId mechanism
+      // the rest of this file relies on (fix #1).
       if (capturedSessionId !== this.sessionId || this.isResetting) {
         this.notifyTypingEnd();
         return;
       }
-  
-      const choiceToUse = mappedChoiceId
+
+      const matchedChoice = mappedChoiceId
         ? availableChoices.find(c => c.id === mappedChoiceId)
-        : availableChoices[0];
-  
+        : undefined;
+
+      // No confident match: still fall back to the first choice so the story keeps
+      // moving, but do NOT present the "acknowledge what they said" line, which
+      // implies Maya agreed with a specific option the player never actually chose.
+      // Instead regenerate with a neutral prompt that gently moves things forward
+      // without claiming a deliberate pick (fix #4).
+      const choiceToUse = matchedChoice ?? availableChoices[0];
+
       if (!choiceToUse) {
         throw new Error("Failed to select a valid choice");
       }
-      
-      const responsePrompt = `
-        You are playing the character of Maya in a narrative game about surviving a typhoon in the Philippines.
-        
-        CURRENT CONTEXT:
-        ${currentNode.text}
-        
-        PLAYER'S MESSAGE:
-        "${text}"
-        
-        INSTRUCTIONS:
-        1. Acknowledge what the player said in a natural way
-        2. Keep your response under 2-3 sentences, in Maya's voice
-        3. Your response must be in ENGLISH ONLY (never use Filipino)
-        4. Your response should naturally follow from the current context
-        5. DO NOT use quotation marks at the beginning or end of your response
-        6. Write as if you are speaking directly, not quoting someone
-      `;
-  
-      const aiResponse = await this.aiManager.generateText(
-        responsePrompt,
-        currentNode.text,
-        this.gameState
-      );
-      
-      if (capturedSessionId !== this.sessionId || this.isResetting) {
-        this.notifyTypingEnd();
-        return;
-      }
-      
-      let aiResponseText = aiResponse || "I understand. That's important to consider.";
-      
-      aiResponseText = aiResponseText.trim();
-      aiResponseText = aiResponseText.replace(/^["'"']|["'"']$/g, '');
 
-      aiResponseText = aiResponseText.split('\n')
-        .map(line => line.trim().replace(/^["'"']|["'"']$/g, ''))
-        .join('\n');
-  
-      const typingTime = Math.min(Math.max(aiResponseText.length * 30, 1200), 3000);
+      let rawResponse: string | null;
+      if (matchedChoice) {
+        rawResponse = acknowledgeResponse;
+      } else {
+        const noMatchPrompt = this.buildNoMatchPrompt(currentNode.text, text);
+        rawResponse = await this.aiManager.generateText(
+          noMatchPrompt,
+          currentNode.text,
+          this.gameState
+        );
+
+        if (capturedSessionId !== this.sessionId || this.isResetting) {
+          this.notifyTypingEnd();
+          return;
+        }
+      }
+
+      const fallbackLine = matchedChoice
+        ? "I understand. That's important to consider."
+        : "Okay — let's keep moving. We can't lose any time.";
+      const aiResponseText = this.sanitizeDialogue(rawResponse || fallbackLine);
+
+      const typingTime = calculateTypingDelay(aiResponseText.length, 30, 1200, 3000);
       await this.timeManager.delay(typingTime);
-      
+
       if (capturedSessionId !== this.sessionId || this.isResetting) {
         this.notifyTypingEnd();
         return;
       }
-      
+
       this.notifyTypingEnd();
-  
+
       const aiMessage: Message = {
         id: `ai_response_${Date.now()}`,
         text: aiResponseText,
@@ -665,43 +655,49 @@ export class StoryEngine {
         isPlayer: false,
         showTimestamp: true
       };
-      
+
       this.messages.push(aiMessage);
       this.notifyMessageListeners();
       this.saveManager.saveMessages(this.messages);
-  
+
       if (capturedSessionId !== this.sessionId || this.isResetting) {
         return;
       }
-  
+
       if (choiceToUse.effect) {
         this.gameState = choiceToUse.effect(this.gameState);
+        this.notifyGameStateUpdate();
       }
-      
+
       const nextNodeId = choiceToUse.nextNodeId;
       this.gameState.currentNodeId = nextNodeId;
       this.gameState.lastTimestamp = Date.now();
       this.gameState.messagesComplete = false;
-      
+
       this.saveManager.saveGame(this.gameState);
-      
+
       if (currentNode.waitTime && currentNode.waitTime > 0) {
         await this.handleWaitTime(currentNode);
-        
+
         if (capturedSessionId !== this.sessionId || this.isResetting) {
           return;
         }
       }
-      
+
       await this.timeManager.delay(1000);
-      
+
       if (capturedSessionId !== this.sessionId || this.isResetting) {
         return;
       }
-      
+
       await this.displayCurrentNode();
-  
-    } catch {
+
+    } catch (error) {
+      // Fix #2: this was previously a bare `catch { ... }` that discarded every
+      // thrown error (real bugs included) with no logging. Log it like every other
+      // AI call site in the codebase, while keeping the existing graceful fallback
+      // (the "Let me continue..." line + default-choice progression) unchanged.
+      console.error('Error handling custom AI response:', error);
       this.notifyTypingEnd();
   
       if (capturedSessionId === this.sessionId && !this.isResetting) {
@@ -736,6 +732,91 @@ export class StoryEngine {
         }
       }
     }
+  }
+
+  /**
+   * Prompt used when the player's free text maps confidently onto a choice: Maya
+   * acknowledges what they said and continues naturally. It deliberately avoids
+   * referencing the mapped choice so it can be generated concurrently with the
+   * mapping call (fix #1).
+   */
+  private buildAcknowledgePrompt(nodeText: string, playerText: string): string {
+    return `
+      You are playing the character of Maya in a narrative game about surviving a typhoon in the Philippines.
+
+      CURRENT CONTEXT:
+      ${nodeText}
+
+      PLAYER'S MESSAGE:
+      ${playerText}
+
+      INSTRUCTIONS:
+      1. Acknowledge what the player said in a natural way
+      2. Keep your response under 2-3 sentences, in Maya's voice
+      3. Your response must be in ENGLISH ONLY (never use Filipino)
+      4. Your response should naturally follow from the current context
+      5. DO NOT use quotation marks anywhere in your response — not around your words and not to represent spoken dialogue
+      6. Write as if you are speaking directly to the player, never quoting yourself or anyone else
+    `;
+  }
+
+  /**
+   * Prompt used when the player's free text matches no available choice
+   * confidently. Rather than reusing the "acknowledge" framing (which would imply
+   * Maya agreed to a specific option the player never chose), this asks for a
+   * neutral line that gently keeps the moment moving (fix #4).
+   */
+  private buildNoMatchPrompt(nodeText: string, playerText: string): string {
+    return `
+      You are playing the character of Maya in a narrative game about surviving a typhoon in the Philippines.
+
+      CURRENT CONTEXT:
+      ${nodeText}
+
+      PLAYER'S MESSAGE:
+      ${playerText}
+
+      INSTRUCTIONS:
+      1. The player said something that does not clearly match any available option
+      2. Respond with a brief, in-character line that gently keeps the moment moving forward
+      3. Do NOT agree to or confirm any specific plan or decision — the player has not actually chosen one
+      4. Keep it under 2-3 sentences, in Maya's voice, in ENGLISH ONLY (never Filipino)
+      5. DO NOT use quotation marks anywhere in your response — not around your words and not to represent spoken dialogue
+      6. Write as if you are speaking directly to the player, never quoting yourself or anyone else
+    `;
+  }
+
+  /**
+   * Cleans up AI-generated dialogue before it is shown as a chat bubble. The model
+   * sometimes wraps its spoken lines in quotation marks despite the prompt (e.g.
+   * `"Stay close." I nod. "Let's go."`), which reads oddly for a character meant to
+   * be speaking directly. We strip *paired* double-quote marks (straight or curly)
+   * anywhere in the string — matching an opening and closing quote and keeping the
+   * words between them — so embedded quote-wrapped fragments are unwrapped, not just
+   * ones at the very start/end. Because we only remove balanced pairs, a single
+   * stray quote is left alone; and because the pattern never touches single quotes /
+   * apostrophes (U+0027 / U+2019), contractions like "I'm" and "don't" survive.
+   */
+  private sanitizeDialogue(text: string): string {
+    let cleaned = text.trim();
+
+    // Unwrap any paired double quotes (straight ", curly “ ”) anywhere in the text.
+    cleaned = cleaned.replace(/["“”]([^"“”]*)["“”]/g, '$1');
+
+    // Drop a single pair of straight single quotes only if they wrap the whole line
+    // (a common "quoted the entire response" pattern); this cannot hit a contraction
+    // because those never span the full string start-to-end.
+    cleaned = cleaned.replace(/^'([\s\S]*)'$/, '$1');
+
+    // Collapse any stray double spaces left where a quote+space was removed, and
+    // normalize per-line whitespace.
+    cleaned = cleaned
+      .split('\n')
+      .map(line => line.replace(/ {2,}/g, ' ').trim())
+      .join('\n')
+      .trim();
+
+    return cleaned;
   }
 
   private checkForEnding(): void {
@@ -830,6 +911,7 @@ export class StoryEngine {
 
     this.messages = [];
     this.notifyMessageListeners();
+    this.notifyGameStateUpdate();
 
     setTimeout(() => {
       this.isResetting = false;

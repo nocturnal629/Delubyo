@@ -655,11 +655,23 @@ footer {
 
 .signal-indicator {
   position: absolute;
-  top: 5px;
+  top: 8px;
   right: 10px;
-  font-size: 12px;
+  font-size: 11px;
+  letter-spacing: 2px;
+  line-height: 1;
   color: var(--primary-color);
+  background-color: rgba(0, 0, 0, 0.35);
+  padding: 3px 7px;
+  border-radius: 10px;
   z-index: 10;
+  pointer-events: none;
+  user-select: none;
+}
+
+[data-theme="light"] .signal-indicator {
+  background-color: rgba(255, 255, 255, 0.75);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .signal-weak {
@@ -674,33 +686,163 @@ footer {
   color: var(--success-color);
 }
 
+/* Live game status strip (location + condition) */
+.game-hud {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  margin-bottom: 10px;
+  background-color: var(--light-bg);
+  border-radius: var(--border-radius);
+  box-shadow: var(--box-shadow);
+  font-size: 13px;
+  position: relative;
+  z-index: 2;
+}
+
+.hud-location {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--secondary-color);
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  min-width: 0;
+}
+
+.hud-location-pin {
+  color: var(--primary-color);
+  font-size: 11px;
+}
+
+.hud-location-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-health {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.hud-health-label {
+  color: var(--light-text);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.6px;
+}
+
+.hud-health-bar {
+  width: 90px;
+  height: 8px;
+  border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+[data-theme="light"] .hud-health-bar {
+  background-color: rgba(0, 0, 0, 0.08);
+}
+
+.hud-health-fill {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 0.5s ease, background-color 0.5s ease;
+}
+
+.hud-health-fill.health-high {
+  background-color: var(--success-color);
+}
+
+.hud-health-fill.health-mid {
+  background-color: var(--neutral-color);
+}
+
+.hud-health-fill.health-low {
+  background-color: var(--danger-color);
+}
+
+.hud-health-value {
+  min-width: 24px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text-color);
+}
+
 @media (max-width: 768px) {
   .app-container {
     padding: 10px;
     height: 100vh;
+    height: 100dvh;
   }
-  
+
+  header {
+    margin-bottom: 6px;
+  }
+
   h1 {
     font-size: 1.8rem;
+    letter-spacing: 2px;
   }
-  
+
+  .game-hud {
+    padding: 7px 10px;
+    font-size: 12px;
+    gap: 8px;
+  }
+
+  .hud-health-bar {
+    width: 64px;
+  }
+
+  .hud-health-label {
+    display: none;
+  }
+
   .message-container {
     padding: 10px;
   }
-  
+
   .message {
-    max-width: 85%;
+    max-width: 88%;
     padding: 8px 10px;
     font-size: 14px;
   }
-  
+
   .choice-button {
-    padding: 8px 12px;
+    padding: 10px 12px;
     font-size: 14px;
   }
-  
+
   .character-status {
     font-size: 11px;
+  }
+
+  .settings {
+    gap: 10px;
+    font-size: 13px;
+  }
+
+  .signal-indicator {
+    top: 6px;
+    right: 8px;
+  }
+}
+
+@media (max-width: 420px) {
+  h1 {
+    font-size: 1.5rem;
+  }
+
+  .game-hud {
+    flex-wrap: wrap;
+    gap: 4px 10px;
   }
 }
 
@@ -737,10 +879,35 @@ footer {
   font-weight: bold;
   cursor: pointer;
   margin-top: -5px;
+  background: none;
+  border: none;
+  line-height: 1;
+  padding: 0;
 }
 
-.close-button:hover {
+.close-button:hover,
+.close-button:focus-visible {
   color: var(--primary-color);
+  outline: none;
+}
+
+.ai-settings-status {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.ai-settings-status--error {
+  background-color: rgba(220, 53, 69, 0.12);
+  color: #dc3545;
+  border: 1px solid rgba(220, 53, 69, 0.4);
+}
+
+.ai-settings-status--success {
+  background-color: rgba(40, 167, 69, 0.12);
+  color: #28a745;
+  border: 1px solid rgba(40, 167, 69, 0.4);
 }
 
 .modal h2 {

@@ -17,7 +17,14 @@ if (USE_AI) {
   const apiUrl = localStorage.getItem('ai_api_url') || '';
 
   if (apiKey) {
-    aiManager = new AIManager(provider, apiKey, apiUrl);
+    try {
+      aiManager = new AIManager(provider, apiKey, apiUrl);
+    } catch (error) {
+      // e.g. CloudIQ selected without a base URL. Fail loudly rather than
+      // silently running without AI, but still let the game load.
+      console.error('Failed to configure AI provider:', error);
+      aiManager = null;
+    }
   }
 }
 

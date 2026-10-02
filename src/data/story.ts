@@ -34,12 +34,17 @@ export const storyNodes: StoryNode[] = [
       character: CHARACTER_MAYA
     },
     {
-      text: "If the power goes out for too long, we could lose everything. This research could help coastal communities prepare for future storms.",
-      delay: 3500,
+      text: "If the power goes out for too long, we could lose everything.",
+      delay: 2000,
       character: CHARACTER_MAYA
     },
     {
-      text: "The weather service classifies Mani as only Signal no. 1. I've weathered storms like this before.",
+      text: "And this research could help whole coastal communities prepare for the next one.",
+      delay: 2500,
+      character: CHARACTER_MAYA
+    },
+    {
+      text: "The weather service still has Mani as only Signal no. 1. I've ridden out storms like this before.",
       delay: 2500,
       character: CHARACTER_MAYA
     }
@@ -959,7 +964,11 @@ export const storyNodes: StoryNode[] = [
     {
       id: 'choice_race_to_shed',
       text: "Secure yourself in the shed. That was incredibly close.",
-      nextNodeId: 'night_in_shed'
+      nextNodeId: 'night_fall_decision',
+      effect: (state) => ({
+        ...state,
+        relationships: { ...state.relationships, trust: (state.relationships.trust || 0) + 1 }
+      })
     }
   ]
 },
@@ -1058,7 +1067,11 @@ export const storyNodes: StoryNode[] = [
     {
       id: 'choice_shelter_3c',
       text: "You made the right choice. Use anything available to reinforce your shelter for the night.",
-      nextNodeId: 'night_in_shed'
+      nextNodeId: 'night_fall_decision',
+      effect: (state) => ({
+        ...state,
+        relationships: { ...state.relationships, trust: (state.relationships.trust || 0) + 1 }
+      })
     }
   ]
 },
@@ -1108,6 +1121,47 @@ export const storyNodes: StoryNode[] = [
       id: 'choice_reach_shed_injured',
       text: "Tend to your injuries as best you can and secure yourself for the night. You've survived the worst.",
       nextNodeId: 'night_in_shed_injured'
+    }
+  ]
+},
+
+{
+  id: 'night_fall_decision',
+  character: CHARACTER_MAYA,
+  text: "The light is almost gone. I have to get through the night somehow.",
+  delay: 2000,
+  followupMessages: [
+    {
+      text: "Part of me wants to sleep. The rest of me is terrified of what I'll miss if I close my eyes.",
+      delay: 2500,
+      character: CHARACTER_MAYA
+    },
+    {
+      text: "I could rest, or I could stay up and keep talking to you. I honestly don't know which is smarter.",
+      delay: 2500,
+      character: CHARACTER_MAYA
+    }
+  ],
+  choices: [
+    {
+      id: 'choice_night_fall_rest',
+      text: "Rest while you can. Your body needs it more than your fear does.",
+      nextNodeId: 'night_in_shed',
+      effect: (state) => ({
+        ...state,
+        relationships: { ...state.relationships, trust: (state.relationships.trust || 0) + 1 },
+        flags: { ...state.flags, restedWell: true }
+      })
+    },
+    {
+      id: 'choice_night_fall_watch',
+      text: "Keep watch, and keep talking to me. You won't get through this alone.",
+      nextNodeId: 'night_check_1',
+      effect: (state) => ({
+        ...state,
+        relationships: { ...state.relationships, trust: (state.relationships.trust || 0) + 1 },
+        flags: { ...state.flags, keptWatch: true }
+      })
     }
   ]
 },
@@ -1183,7 +1237,11 @@ export const storyNodes: StoryNode[] = [
     {
       id: 'choice_night_check_2',
       text: "Leave them be. They're just trying to survive too. Try to get more rest now.",
-      nextNodeId: 'night_in_shed'
+      nextNodeId: 'night_in_shed',
+      effect: (state) => ({
+        ...state,
+        relationships: { ...state.relationships, trust: (state.relationships.trust || 0) + 1 }
+      })
     }
   ]
 },
@@ -2027,7 +2085,11 @@ export const storyNodes: StoryNode[] = [
     {
       id: 'choice_successful_rescue',
       text: "I'm just glad you're safe now. Your survival is a testament to your resilience.",
-      nextNodeId: 'recovery_center'
+      nextNodeId: 'recovery_center',
+      effect: (state) => ({
+        ...state,
+        relationships: { ...state.relationships, trust: (state.relationships.trust || 0) + 1 }
+      })
     }
   ]
 },
@@ -2334,6 +2396,14 @@ export const storyNodes: StoryNode[] = [
 ];
 
 export const endings: Ending[] = [
+{
+  id: 'resilient_ending',
+  type: EndingType.GOOD,
+  text: "Maya survived unharmed, but what carried her through the longest night was not her equipment or her data - it was the voice on the other end of the line that never left her alone. This ending shows that in a disaster, steady human connection can be as vital as any supply. By staying present with her through her fear, you helped her hold onto herself, and she will carry that forward into every person she guides to safety next.",
+  condition: (state) => {
+    return state.currentNodeId === 'ending_good' && !state.flags.isInjured && (state.relationships.trust || 0) >= 4;
+  }
+},
 {
   id: 'good_ending',
   type: EndingType.GOOD,

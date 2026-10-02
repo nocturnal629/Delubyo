@@ -43,6 +43,7 @@ This will launch the application at `http://localhost:3000`.
 - `yarn build` - Build the application for production
 - `yarn preview` - Preview the production build locally
 - `yarn lint` - Run ESLint to check for code issues
+- `yarn test` - Run the unit test suite (Vitest)
 
 ## Alternative Package Managers
 
@@ -70,8 +71,14 @@ Delubyo supports different AI providers for enhancing game content:
 - Claude AI
 - DeepSeek AI
 - Google Gemini
+- CloudIQ (self-hosted / bring-your-own-host, OpenAI-compatible gateway)
 
 You can configure these providers in the game settings.
+
+CloudIQ is a self-hosted option: because it runs on your own gateway it has no
+public endpoint, so it requires **both** a base URL (e.g.
+`https://your-cloudiq-host.example.com/v1`) **and** an API key (sent as an
+`X-API-Key` header). It defaults to the `cloudiq-smart` model.
 
 ## License
 
